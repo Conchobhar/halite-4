@@ -3,16 +3,15 @@ from collections import namedtuple, OrderedDict
 import numpy as np
 np.seterr(all='raise')
 """NEXT
-    -assign next move
-        -if enemy, move if <eship.halite + 0.25*cell.halite
-    -when to return
-    -dropoff role
+    -test and debug v0
+    -build yard when there are zero
+    -ship spawn kill point
     
-    -enemy avoidance
     -each ship should have its own threat modifier for cells
         -ve if ship.halite < avg. enemy
         +ve if ship.halite > avg. enemy
     -while mining, low hlt ships should try to wall perimeter
+    -build extra yard at some point
 """
 
 """Items for ship log
@@ -146,10 +145,13 @@ class MyAgent:
             (0,1,2,3,4,5) --> (0,1,2,-2,-1,0)"""
         return (x + self.mid) % 5 - self.mid
 
-    def is_pos_occupied_by_threat(self, ship, ppos):
-        ppos_ship = self.board.cells[ppos].ship
+    def is_pos_occupied_by_threat(self, ship, ppos, assume_harvest=True):
+        cell = self.board.cells[ppos]
+        ppos_ship = cell.ship
         if ppos_ship is not None:
-            is_occupied_by_threat = ppos_ship.player_id != self.me.id and ppos_ship.halite < ship.halite
+            is_occupied_by_threat = (
+                    ppos_ship.player_id != self.me.id and
+                    (ppos_ship.halite + cell.halite*self.board.configuration.collect_rate) < ship.halite)
         else:
             is_occupied_by_threat = False
         return is_occupied_by_threat
@@ -160,8 +162,11 @@ class MyAgent:
         pt - pos of target
         Normalize:  translate origin to ps (i.e. subtract ps from pt)
                     map higher half coords to -ve values
+        Avoid actions that are potentially unsafe
+
+        Ideally would rate every option based on threats vs potential to win encounter.
         """
-        #TODO - prioritize based on ship threat density
+        #TODO maybe - prioritize based on ship threat density
         ps = ship.position
         pnorm = (self.map_cyclic_coords(pt[0] - ps[0]),
                  self.map_cyclic_coords(pt[1] - ps[1]))
@@ -172,9 +177,9 @@ class MyAgent:
             ShipAction.WEST:  (1 if pnorm[0] < 0 else -1),
             None: 0,
         }
-        chosen_action = None
+        chosen_action = 'UNDECIDED'
         n_conditions = 3
-        while chosen_action is None:
+        while chosen_action is 'UNDECIDED':
             # for each possible action, in order of preference, determine if safe
             # If no action is safe, reduce the amount safety conditions until no options are left.
             for action in sorted(actions, key=actions.get)[::-1]:
@@ -182,7 +187,7 @@ class MyAgent:
                 ppos_adjs = [ppos.translate(adelta[a], self.dim) for a in actions if a is not None]
                 ppos_adjs.remove((ps.x, ps.y))
                 # not occupied by enemy ship with less halite
-                is_not_occupied_by_threat = not self.is_pos_occupied_by_threat(ship, ppos)
+                is_not_occupied_by_threat = not self.is_pos_occupied_by_threat(ship, ppos, assume_harvest=True)
                 is_not_occupied_by_self = (ppos not in LOG.set_points)
                 is_not_occupied_by_potential_threats = any([self.is_pos_occupied_by_threat(ship, ppos_adj) for ppos_adj in ppos_adjs])
                 # Conditions are ordered by priority
@@ -192,7 +197,7 @@ class MyAgent:
                 else:
                     n_conditions -= 1
                 if n_conditions == 0:
-                    chosen_action = None  # No good moves found # TODO log this
+                    chosen_action = None  # No good moves found TODO log this
         return chosen_action
 
     def determine_best_harvest_action(self, ship):
@@ -208,7 +213,7 @@ class MyAgent:
             ship.log.p_action = self.move_to_target(ship.position, ship.log.yard)
             ship.log.p_point = ship.position + ship.log.p_action
         else:
-            raise BaseException('depositor but on yard pos and didnt switch role?')
+            raise BaseException('depositor but ship is on yard pos and didnt switch role?')
 
     def determine_ship_action(self, ship):
         """TODO possible issues with role switch conditions here."""
