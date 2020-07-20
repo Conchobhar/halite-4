@@ -32,8 +32,16 @@ adelta = {
     ShipAction.EAST: (1, 0),
     ShipAction.SOUTH: (0, -1),
     ShipAction.WEST: (-1, 0),
+    None: (0, 0),
 }
 
+ainverse = {
+    ShipAction.NORTH: ShipAction.SOUTH,
+    ShipAction.EAST: ShipAction.WEST,
+    ShipAction.SOUTH: ShipAction.NORTH,
+    ShipAction.WEST: ShipAction.EAST,
+    None: None,
+}
 
 class LogEntry:
     """Like a dictionary, without the ['fluff']"""
@@ -58,7 +66,7 @@ class Log(dict):
 
     @property
     def set_points(self):  # Assigned
-        return [x.set_points for x in self.values() if x.spot is not None]
+        return [x.set_point for x in self.values() if x.set_point is not None]
 
 
 LOG = Log()
@@ -184,8 +192,8 @@ class MyAgent:
             # If no action is safe, reduce the amount safety conditions until no options are left.
             for action in sorted(actions, key=actions.get)[::-1]:
                 ppos = ps.translate(adelta[action], self.dim)
-                ppos_adjs = [ppos.translate(adelta[a], self.dim) for a in actions if a is not None]
-                ppos_adjs.remove((ps.x, ps.y))
+                action_inverse = ainverse[action]
+                ppos_adjs = [ppos.translate(adelta[a], self.dim) for a in actions if a not in (None, action_inverse)]
                 # not occupied by enemy ship with less halite
                 is_not_occupied_by_threat = not self.is_pos_occupied_by_threat(ship, ppos, assume_harvest=True)
                 is_not_occupied_by_self = (ppos not in LOG.set_points)
@@ -203,8 +211,8 @@ class MyAgent:
     def determine_best_harvest_action(self, ship):
         if not ship.position == ship.log.spot:  # move to spot
             ship.log.p_action = self.move_to_target(ship, ship.log.spot)
-            ship.log.p_point = ship.position + ship.log.p_action
-        else: # harvest
+            ship.log.p_point = ship.position.translate(adelta[ship.log.p_action], self.dim)
+        else:  # harvest
             ship.log.p_action = None
             ship.log.p_point = ship.position
 
@@ -236,8 +244,8 @@ class MyAgent:
         self.board = Board(obs, config)
         self.me = self.board.current_player
         me, self.b, self.bp = self.me, self.board, self.board_prev  # just for shorthand
-        self.refresh_ships()
         spawncount = 0
+        self.refresh_ships()
         self.yardcount = len(self.me.shipyards)
         self.mean_halite = int(np.mean([cell.halite for cell in self.board.cells.values() if cell.halite != 0]))
         C['halite_harvest_minimum'] = self.mean_halite
@@ -247,17 +255,17 @@ class MyAgent:
         self.generate_harvest_values()
         while len(me.next_actions) != len(me.ships):
             # Main ship loop - iterate until each ship has an action
-            for ship in me.ships:
-                # TODO - order ships by priority. should be done after yard building assigned
-                # TODO - ships on SY should go first
-                # If first turn, create yard
-                # TODO - if ndocks < 1, prioritize building yard
-                if obs.step == 0:
-                    ship.next_action = ShipAction.CONVERT
-                    self.prospective_yard_pos = ship.position
-                else:
+            # TODO - order ships by priority. should be done after yard building assigned
+            # TODO - ships on SY should go first
+            # If first turn, create yard
+            # TODO - if ndocks < 1, prioritize building yard
+            for ship in me.ships:1
+                if obs.step != 0:
                     # ship.next_action = ShipAction.NORTH
                     self.determine_ship_action(ship)
+                else:
+                    ship.next_action = ShipAction.CONVERT
+                    self.prospective_yard_pos = ship.position
 
         # Ship building
         for shipyard in me.shipyards:
@@ -267,7 +275,6 @@ class MyAgent:
                 spawncount += 1
         self.board_prev = self.board
         return me.next_actions
-
 
 
 def agent(obs, config):
