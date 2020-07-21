@@ -4,7 +4,7 @@ from kaggle_environments import evaluate, make
 from agent.base import agent
 
 pathroot = Path('/home/xu/work/kaggle/halite/')
-config = {"size": 7, "startingHalite": 1000}
+config = {"size": 7, "startingHalite": 1000, "randomSeed":0}
 env = make("halite", configuration=config, debug=True)
 trainer = env.train([None, 'random'])
 """observation

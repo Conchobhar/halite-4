@@ -1,5 +1,5 @@
 from kaggle_environments.envs.halite.helpers import Board, ShipAction, ShipyardAction, Ship
-from collections import namedtuple, OrderedDict
+from collections import Counter, OrderedDict
 import numpy as np
 np.seterr(all='raise')
 """NEXT
@@ -43,6 +43,7 @@ ainverse = {
     None: None,
 }
 
+
 class LogEntry:
     """Like a dictionary, without the ['fluff']"""
     def __init__(self):
@@ -51,25 +52,52 @@ class LogEntry:
         self.yard = None
         self.p_action = None
         self.p_point = None
-        self.set_action = None
         self.set_point = None
+        self.per_turn_names = ['p_action', 'p_point', 'set_point', ]
+
+    def reset_turn_values(self):
+        """Reset values that don't carry across turns."""
+        for name in self.per_turn_names:
+            setattr(self, name, None)
 
 
 class Log(dict):
     """Keys are ships. Values are a LogEntry()"""
     def __init__(self):
         super().__init__()
+        # Keep a reference to me - necessary to extract `next_actions`
+        self.me = None
 
     @property
     def spots(self):  # Assigned harvest spots
         return [x.spot for x in self.values() if x.spot is not None]
 
     @property
-    def set_points(self):  # Assigned
+    def p_points(self):  # Potential next turn positions
+        return [x.p_point for x in self.values() if x.p_point is not None]
+
+    @property
+    def p_point2ship(self):  # point 2 potential ships map - excluding ships already set
+        p2s = {}
+        for ship in [s for s in self if s.id not in self.me.next_actions]:
+            if ship.log.p_point not in p2s:
+                p2s[ship.log.p_point] = [ship]
+            else:
+                p2s[ship.log.p_position].append(ship)
+        return p2s
+
+    @property
+    def set_points(self):  # Assigned next turn positions
         return [x.set_point for x in self.values() if x.set_point is not None]
 
+    @property
+    def unset_ships(self):  # Assigned next turn positions
+        return [s for s, log in self.items() if log.set_point is None]
 
+
+global LOG
 LOG = Log()
+
 
 C = {
     'halite_harvest_minimum': 75,  # todo - should be function of map avg. and local avg.
@@ -86,26 +114,32 @@ class MyAgent:
         self.dim = config.size
         self.mid = config.size // 2
         self.harvest_spot_values = None
-        self.enemy_ship_point = None
+        self.enemy_ship_points = None
         self.mean_halite = None
         self.yardcount = None
         self.prospective_yard_pos = None
+        self.action_iter = None
 
     def update(self):
         pass
 
     def refresh_ships(self):
-        """Update ship tasks"""
-        ids = list(LOG.keys())
+        """Attach `me` to LOG
+        Refresh log keys (i.e. ship obj) connecting to new state through ship.id
+        Attach global LOG as attribute for conveniance."""
+        global LOG
+        old_log = LOG
+        LOG = Log()  # Clears any crashed ships - LOG is rebuilt below
+        ids = [{s.id: le} for s, le in old_log.items()]
+        LOG.me = self.me
         for s in self.me.ships:
-            if s in LOG:  # reconnect log
+            if s.id in ids:  # reconnect log
+                LOG[s] = ids[s.id]
                 s.log = LOG[s]
-                ids.remove(s)
-            else:  # mark new ships - update global LOG and add attr for ships entry
+                s.log.reset_turn_values()
+            else:  # log new ships
                 LOG[s] = LogEntry()
                 s.log = LOG[s]
-        for s in ids:  # remaining ship ids therefore have crashed
-            del LOG[s]
 
     def dist(self, p1, p2):
         p1, p2 = np.array(p1), np.array(p2)
@@ -134,12 +168,13 @@ class MyAgent:
             self.harvest_spot_values = sorted(d.items(), key=lambda x: -x[1])
             # todo - weight by threat == smoothed ship density, shipThreat = "avg ship halite"/shipHalite
 
-    def assign_role(self, ship):
+    @staticmethod
+    def assign_role(ship):
         ship.log.role = 'HARVESTER'
         ship.log.spot = None
 
     def determine_best_harvest_spot(self, ship):
-        # Choose a spot to harvest
+        # Choose a spot to harvest - values already sorted desceding.
         spots_with_min_halite = [(spot, value) for spot, value in self.harvest_spot_values
             if self.board.cells[spot].halite > C['halite_harvest_minimum']]
         for spot, value in spots_with_min_halite:
@@ -151,15 +186,14 @@ class MyAgent:
         """Map higher half of coordinate space to its -ve equivalent
         e.g. for board dimension of length 5:
             (0,1,2,3,4,5) --> (0,1,2,-2,-1,0)"""
-        return (x + self.mid) % 5 - self.mid
+        return (x + self.mid) % self.dim - self.mid
 
-    def is_pos_occupied_by_threat(self, ship, ppos, assume_harvest=True):
+    def is_pos_occupied_by_threat(self, ship, ppos):
         cell = self.board.cells[ppos]
         ppos_ship = cell.ship
         if ppos_ship is not None:
             is_occupied_by_threat = (
-                    ppos_ship.player_id != self.me.id and
-                    (ppos_ship.halite + cell.halite*self.board.configuration.collect_rate) < ship.halite)
+                    ppos_ship.player_id != self.me.id and ppos_ship.halite < ship.halite)
         else:
             is_occupied_by_threat = False
         return is_occupied_by_threat
@@ -187,7 +221,7 @@ class MyAgent:
         }
         chosen_action = 'UNDECIDED'
         n_conditions = 3
-        while chosen_action is 'UNDECIDED':
+        while chosen_action == 'UNDECIDED':
             # for each possible action, in order of preference, determine if safe
             # If no action is safe, reduce the amount safety conditions until no options are left.
             for action in sorted(actions, key=actions.get)[::-1]:
@@ -195,17 +229,20 @@ class MyAgent:
                 action_inverse = ainverse[action]
                 ppos_adjs = [ppos.translate(adelta[a], self.dim) for a in actions if a not in (None, action_inverse)]
                 # not occupied by enemy ship with less halite
-                is_not_occupied_by_threat = not self.is_pos_occupied_by_threat(ship, ppos, assume_harvest=True)
+                is_not_occupied_by_threat = not self.is_pos_occupied_by_threat(ship, ppos)
                 is_not_occupied_by_self = (ppos not in LOG.set_points)
-                is_not_occupied_by_potential_threats = any([self.is_pos_occupied_by_threat(ship, ppos_adj) for ppos_adj in ppos_adjs])
+                is_not_occupied_by_potential_threats = any(
+                    [not self.is_pos_occupied_by_threat(ship, ppos_adj) for ppos_adj in ppos_adjs])
                 # Conditions are ordered by priority
                 conditions = [is_not_occupied_by_threat, is_not_occupied_by_self, is_not_occupied_by_potential_threats]
-                if all(conditions[0:n_conditions-1]):
+                if all(conditions[0:n_conditions]):
                     chosen_action = action
+                    break
                 else:
                     n_conditions -= 1
                 if n_conditions == 0:
                     chosen_action = None  # No good moves found TODO log this
+                    break
         return chosen_action
 
     def determine_best_harvest_action(self, ship):
@@ -243,7 +280,7 @@ class MyAgent:
     def get_actions(self, obs, config):
         self.board = Board(obs, config)
         self.me = self.board.current_player
-        me, self.b, self.bp = self.me, self.board, self.board_prev  # just for shorthand
+        me = self.me  # just for shorthand
         spawncount = 0
         self.refresh_ships()
         self.yardcount = len(self.me.shipyards)
@@ -251,21 +288,39 @@ class MyAgent:
         C['halite_harvest_minimum'] = self.mean_halite
         C['ship_carry_maximum'] = self.mean_halite * 4
         self.enemy_ship_points = [ship.position for plr in self.board.players.values()
-                               if plr is not self.me for ship in plr.ships]
+                                  if plr is not self.me for ship in plr.ships]
         self.generate_harvest_values()
+        # Main ship loop - iterate until each ship has an action
+        # TODO - order ships by priority. should be done after yard building assigned
+        # TODO - ships on SY should go first
+        # TODO - if ndocks < 1, prioritize building yard
+        self.action_iter = 0
         while len(me.next_actions) != len(me.ships):
-            # Main ship loop - iterate until each ship has an action
-            # TODO - order ships by priority. should be done after yard building assigned
-            # TODO - ships on SY should go first
-            # If first turn, create yard
-            # TODO - if ndocks < 1, prioritize building yard
-            for ship in me.ships:1
+            self.action_iter += 1
+            if self.action_iter > 25:
+                raise BaseException(f"action resolution iteration > 25 - probable infinite loop")
+            print(self.action_iter)
+            # Calculate best potential actions
+            for ship in [s for s in me.ships if s.id not in me.next_actions]:
+                print("ship turn")
+                # If first turn, create yard
                 if obs.step != 0:
                     # ship.next_action = ShipAction.NORTH
                     self.determine_ship_action(ship)
                 else:
                     ship.next_action = ShipAction.CONVERT
+                    ship.log.p_point = None  # conversion is resolved before collision - we don't need to reserve point.
                     self.prospective_yard_pos = ship.position
+
+            # Set non-conflicting actions
+            p2s = LOG.p_point2ship  # point2ship map - excluding set ships
+            for point, ships in p2s.items():
+                if len(ships) == 1:  # Only contender - give action
+                    ships[0].next_action = ships[0].log.p_action
+                    # When ship action is calculated above, any set points should now not be possibilities.
+                else:  # Give spot to highest priority ship (currently highest halite)
+                    priority_ship = sorted([(s,s.halite) for s in ships], key=lambda x:-x[1])[0]
+                    priority_ship.next_action = priority_ship.log.p_action
 
         # Ship building
         for shipyard in me.shipyards:
