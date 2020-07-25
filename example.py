@@ -5,9 +5,9 @@ from agent.base import agent
 from time import time
 
 pathroot = Path('/home/xu/work/kaggle/halite/')
-config = {"size": 7, "startingHalite": 1000, "randomSeed":0}
+config = {"size": 21, "startingHalite": 24000, "randomSeed": 1984826053}
 env = make("halite", configuration=config, debug=True)
-trainer = env.train([None, 'random'])
+trainer = env.train([None, 'random', 'random', 'random'])
 """observation
 'player', 'step', 'halite',         'players'
  0         1       MAPSIZE**2 array  ...
