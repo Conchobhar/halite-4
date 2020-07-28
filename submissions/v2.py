@@ -331,7 +331,11 @@ class MyAgent:
                 ship.next_action = ShipAction.CONVERT
         else:  # harvest - identical for now!
             ship.log.p_action = self.move_to_target(ship, ship.log.spot_local)
-            ship.log.p_point = ship.position.translate(adelta[ship.log.p_action], self.dim)
+            if ship.log.p_action != ShipAction.CONVERT:  # Will only convert if there are no safe moves.
+                ship.log.p_point = ship.position.translate(adelta[ship.log.p_action], self.dim)
+            else:
+                ship.log.set_action = ShipAction.CONVERT
+                ship.next_action = ShipAction.CONVERT
 
     def determine_best_deposit_action(self, ship):
         # yard_position = ship.log.yard.position if ship.log.yard.position is not None else self.prospective_yard
@@ -377,9 +381,12 @@ class MyAgent:
             self.determine_best_deposit_action(ship)
 
     def get_best_ship_for_yard(self):
-        """Return ship with minimum mean distance to others.
-        Calculate distance between each point pair.
-        Calculate mean of distance for each ships pairings."""
+        """If building a yard after losing the only one:
+            Return ship with minimum mean distance to others.
+                Calculate distance between each point pair.
+                Calculate mean of distance for each ships pairings.
+        else if this will be 2nd yard:
+            # TODO - simple logic. need to perhaps consider halite density and send a ship to a pos to build it"""
         pair_dists = {}
         if len(self.me.ships) == 1:
             return self.me.ships[0]
@@ -466,8 +473,7 @@ class MyAgent:
                     dist = self.dist(pos, sy_pos)
                     halite_expected = min(cell.halite * 1 + self.config.regen_rate ** dist,
                                           self.config.max_cell_halite)  # Potential on arrival
-                    halite_harvest = halite_expected * (
-                                1 - 0.75 ** est_harvest_time)  # Model expected halite after mining?
+                    halite_harvest = halite_expected * (1 - 0.75 ** est_harvest_time)  # Model expected halite after mining?
                     halite_potential = halite_harvest / (2 * dist + est_harvest_time)  # There and back again...
                 else:
                     halite_potential = -1

@@ -8,9 +8,9 @@ import json
 from pathlib import Path
 
 from utils.base import write_html
-from submissions.v1 import agent
+from submissions.v2 import agent
 
-path_replay = Path('./replays/v1-1884308.json')
+path_replay = Path('./replays/v2-1905893.json')
 
 
 '''
@@ -60,4 +60,4 @@ def replay_match(path, playerid, step=0):
 '''
 replay_match(options.file, options.step, options.id)
 '''
-replay_match(path_replay, 1)
+replay_match(path_replay, 0)
