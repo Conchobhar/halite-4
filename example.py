@@ -3,9 +3,12 @@ from pathlib import Path
 from kaggle_environments import evaluate, make
 from agent.base import agent
 from time import time
+from utils.base import write_html
 
-pathroot = Path('/home/xu/work/kaggle/halite/')
-config = {"size": 21, "startingHalite": 24000, "randomSeed": 1984826053}
+"""SEEDS
+1984826053 - t15 ships deposits then returns to same spot
+1695788596 - t5 gridflock - can be fixed with  pathing"""
+config = {"size": 21, "startingHalite": 24000, "randomSeed": 1695788596}
 env = make("halite", configuration=config, debug=True)
 trainer = env.train([None, 'random', 'random', 'random'])
 """observation
@@ -18,10 +21,6 @@ your halite, {}, {'1-1': [122,0]}
 """
 
 
-def write_html(html):
-    with open(os.path.join(pathroot, 'html/render.html'), 'w') as f:
-        f.write(html)
-
 
 def play():
     obs = trainer.reset()
@@ -30,7 +29,7 @@ def play():
         print(f"Step+1: {obs['step']+1}, n actions {len(my_actions)}")
         obs, reward, done, info = trainer.step(my_actions)
         t = env.render(mode='html', return_obj=True, width=800, height=800, header=False, controls=True)
-        write_html(t)
+        write_html(t, 'render.html')
 
 
 t0 = time()

@@ -3,6 +3,7 @@ from collections import OrderedDict
 from functools import lru_cache
 from itertools import combinations, product
 import numpy as np
+
 np.seterr(all='raise')
 """NEXT
     -live
@@ -12,28 +13,28 @@ np.seterr(all='raise')
 
     -improve harvest logic
         if spot.halite < threshold, go to nearby spot Why is ship returning home so early?
-        
+
     -improve next move logic
         - consider halite in cells incase ship ends up waiting
         - consider desirable collisions
-    
+
     -endgame
         call home
         swarm top player
-    
+
     -build extra yard at some point
     if step > 20 and halite > reserve + shipspawn + yardspawn and nyards < 2:
         build yard at midpoint of most halite dense spot and yard 1
 
     -shipbuilding
         if nstep < 300 and totalHalite/4 > 2000
-    
+
     -each ship should have its own threat modifier for cells
         -ve if ship.halite < avg. enemy
         +ve if ship.halite > avg. enemy
-        
+
     -advanced pathing to avoid threat dense areas
-    
+
     -assault role, enabled when not worth mining
 """
 
@@ -72,6 +73,7 @@ pid2quadrant = {
 
 class LogEntry:
     """Like a dictionary, without the ['fluff']"""
+
     def __init__(self):
         self.role = 'NEW'
         self.spot = 'NEW'
@@ -91,6 +93,7 @@ class LogEntry:
 
 class Log(dict):
     """Keys are ships. Values are a LogEntry()"""
+
     def __init__(self):
         super().__init__()
         # Keep a reference to me - necessary to extract `next_actions`
@@ -162,8 +165,8 @@ class MyAgent:
         """Define player quadrant incl. shared points."""
         points = []
         qp = (self.mid // 2) + 1
-        for x in range(-qp, qp+1):
-            for y in range(-qp, qp+1):
+        for x in range(-qp, qp + 1):
+            for y in range(-qp, qp + 1):
                 points.append(self.quadrant_position + (x, y))
         return points
 
@@ -191,10 +194,10 @@ class MyAgent:
                 LOG[s] = LogEntry()
                 s.log = LOG[s]
 
-    @lru_cache(maxsize=21**2)
+    @lru_cache(maxsize=21 ** 2)
     def dist(self, p1, p2):
         p1, p2 = np.array(p1), np.array(p2)
-        p = abs(p1-p2)
+        p = abs(p1 - p2)
         y, x = min(p[0], self.dim - p[0]), min(p[1], self.dim - p[1])
         return abs(sum([x, y]))
 
@@ -276,15 +279,15 @@ class MyAgent:
 
         Ideally would rate every option based on threats vs potential to win encounter.
         """
-        #TODO maybe - prioritize based on ship threat density
+        # TODO maybe - prioritize based on ship threat density
         ps = ship.position
         pnorm = (self.map_cyclic_coords(pt[0] - ps[0]),
                  self.map_cyclic_coords(pt[1] - ps[1]))
         actions = {
             ShipAction.NORTH: (1 if pnorm[1] > 0 else -1),
-            ShipAction.EAST:  (1 if pnorm[0] > 0 else -1),
+            ShipAction.EAST: (1 if pnorm[0] > 0 else -1),
             ShipAction.SOUTH: (1 if pnorm[1] < 0 else -1),
-            ShipAction.WEST:  (1 if pnorm[0] < 0 else -1),
+            ShipAction.WEST: (1 if pnorm[0] < 0 else -1),
             'WAIT': (1 if pnorm == (0, 0) else 0),
         }
         chosen_action = 'UNDECIDED'
@@ -301,11 +304,13 @@ class MyAgent:
                 # not occupied by enemy ship with less halite
                 is_not_occupied_by_threat = not self.is_pos_occupied_by_threat(ship, ppos)
                 is_not_occupied_by_self = (ppos not in LOG.set_points)
-                is_not_blocking_yard = (ship.log.role != 'DEP' and ppos not in [sy.position for sy in self.me.shipyards])
+                is_not_blocking_yard = (
+                            ship.log.role != 'DEP' and ppos not in [sy.position for sy in self.me.shipyards])
                 is_not_occupied_by_potential_threats = all(
                     [not self.is_pos_occupied_by_threat(ship, ppos_adj) for ppos_adj in ppos_adjs])
                 # Conditions are ordered by priority
-                conditions = [is_not_occupied_by_threat, is_not_occupied_by_self, is_not_blocking_yard, is_not_occupied_by_potential_threats]
+                conditions = [is_not_occupied_by_threat, is_not_occupied_by_self, is_not_blocking_yard,
+                              is_not_occupied_by_potential_threats]
                 if all(conditions[0:n_conditions]):
                     chosen_action = action
                     break
@@ -319,7 +324,7 @@ class MyAgent:
     def determine_best_harvest_action(self, ship):
         if not ship.position == ship.log.spot_local:
             ship.log.p_action = self.move_to_target(ship, ship.log.spot_local)
-            if ship.log.p_action != ShipAction.CONVERT: # Will only convert if there are no safe moves.
+            if ship.log.p_action != ShipAction.CONVERT:  # Will only convert if there are no safe moves.
                 ship.log.p_point = ship.position.translate(adelta[ship.log.p_action], self.dim)
             else:
                 ship.log.set_action = ShipAction.CONVERT
@@ -351,12 +356,13 @@ class MyAgent:
                 ship.log.spot_local = ship.log.spot
             target_cell = self.board.cells[ship.log.spot_local]
             # **n harvests under local mean? try somewhere else
-            if target_cell.halite < target_cell.halite_local_mean * 0.75**1:
+            if target_cell.halite < target_cell.halite_local_mean * 0.75 ** 1:
                 """less that local stat? go somewhere else local"""
                 ship.log.spot = self.determine_best_harvest_spot_locally(ship)
                 ship.log.spot_local = ship.log.spot
                 target_cell = self.board.cells[ship.log.spot_local]
-            if self.dist(ship.position, target_cell.position) <= 2 and self.is_pos_occupied_by_threat(ship, target_cell.position):
+            if self.dist(ship.position, target_cell.position) <= 2 and self.is_pos_occupied_by_threat(ship,
+                                                                                                      target_cell.position):
                 ship.log.spot = self.determine_best_harvest_spot_locally(ship)
                 ship.log.spot_local = ship.log.spot
                 target_cell = self.board.cells[ship.log.spot_local]
@@ -389,7 +395,8 @@ class MyAgent:
             for s in self.me.ships:
                 dist = self.dist(s.position, self.me.shipyards[0].position)
                 # hard cody mc hardcodeface
-                if dist > 3 and dist < 10 and self.board.cells[s.position].halite < self.halite_global_mean * 0.75 and s.position in self.quadrant_points:
+                if dist > 3 and dist < 10 and self.board.cells[
+                    s.position].halite < self.halite_global_mean * 0.75 and s.position in self.quadrant_points:
                     sd[s] = self.dist(s.position, self.me.shipyards[0].position)  # working case assuming only 1 SY
             if len(sd) > 0:
                 return sorted(sd, key=sd.get)[::-1][0]
@@ -402,14 +409,14 @@ class MyAgent:
             # lowest_ph_pids =  sorted(ph, key=ph.get)[0:2]
             # pos = pid2quadrant[lowest_ph_pids]
 
-    @lru_cache(maxsize=21**2)
+    @lru_cache(maxsize=21 ** 2)
     def get_adjs(self, p, r=2):
-        coords = [x for x in range(-r, r+1)]
+        coords = [x for x in range(-r, r + 1)]
         # Get product of coords where sum of abs values is <= radius of average area
         # Mod to map coord space
         adjs = [x for x in product(coords, coords) if sum([abs(c) for c in x]) <= r]
         adjs.remove((0, 0))
-        pos_adjs = [((p+x) % self.dim) for x in adjs]
+        pos_adjs = [((p + x) % self.dim) for x in adjs]
         return pos_adjs
 
     def start_of_turn_yard_spawning(self):
@@ -432,7 +439,8 @@ class MyAgent:
     def setup_stats(self):
         """Computables at start of each step. Lazily calculating adjacent positions for each position."""
         self.halite_global_mean = int(np.mean([cell.halite for cell in self.board.cells.values() if cell.halite != 0]))
-        self.halite_global_median = int(np.median([cell.halite for cell in self.board.cells.values() if cell.halite != 0]))
+        self.halite_global_median = int(
+            np.median([cell.halite for cell in self.board.cells.values() if cell.halite != 0]))
         self.halite_global_std = int(np.std([cell.halite for cell in self.board.cells.values() if cell.halite != 0]))
         # g = np.ndarray([self.dim, self.dim])
         self.halite_density = {}
@@ -456,8 +464,10 @@ class MyAgent:
                 if pos in (set(self.quadrant_points) - pos_yards - self.quadrant_adjs):
                     sy_pos = self.get_nearest_shipyard(pos).position
                     dist = self.dist(pos, sy_pos)
-                    halite_expected = min(cell.halite * 1 + self.config.regen_rate ** dist, self.config.max_cell_halite)  # Potential on arrival
-                    halite_harvest = halite_expected * (1 - 0.75**est_harvest_time)  # Model expected halite after mining?
+                    halite_expected = min(cell.halite * 1 + self.config.regen_rate ** dist,
+                                          self.config.max_cell_halite)  # Potential on arrival
+                    halite_harvest = halite_expected * (
+                                1 - 0.75 ** est_harvest_time)  # Model expected halite after mining?
                     halite_potential = halite_harvest / (2 * dist + est_harvest_time)  # There and back again...
                 else:
                     halite_potential = -1
