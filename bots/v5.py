@@ -5,38 +5,9 @@ from itertools import combinations, product
 import numpy as np
 
 np.seterr(all='raise')
-"""NEXT
-    -live
-        -call home
-        -target yards
-        -chaser role
-        -dont hemmorrage syards at end of game
-        -4*mean cond change
-    -1929130.json
-        -152 - trio blockage at (10,~12)
-
-    - Changes to validate in isolation
-    Go home logic
-                < if ship.halite > (target_cell.halite_local_mean * 4):
-                > if ship.halite > (target_cell.halite_local_mean + target_cell.halite_local_std * ???):
-                or 
-                > if ship.halite > (ship.halite / target_cell.halite_local_sum > 1 ???)
-
-    -improve harvest logic
-        if spot.halite < threshold, go to nearby spot Why is ship returning home so early?
-        exclude spots below a threshold - more valuable to protect spots than harvest 
-        calculate est. harvest time on cell as time taken to reduce spot to e.g. 50
-
-    -yard building
-        -Build second yard in smart location
-
-    -each ship should have its own threat modifier for cells
-        -ve if ship.halite < avg. enemy
-        +ve if ship.halite > avg. enemy
-
-    -graph pathing
-
-    -assault role, enabled when not worth mining
+"""Added
+    local_get_pos bug used LOG.set_points vs LOG.spots
+    added basic call home and base targeting
 """
 
 """Items for ship log
@@ -49,7 +20,7 @@ np.seterr(all='raise')
     """
 magic = {
     'turn_to_enable_defenders': 300,  # Use this if defending is causing issues
-    'end_game_step': 350,  # Change ship behaviour for end game
+    'end_game_step': 10,  # Change ship behaviour for end game
 }
 
 # Map move action to positional delta
@@ -90,6 +61,7 @@ class LogEntry:
         self.p_point = None
         self.set_action = None
         self.set_point = None
+        self.atk_target = None
         self.resetable_names = ['p_action', 'p_point', 'set_action', 'set_point', ]
 
     def reset_turn_values(self):
@@ -107,6 +79,7 @@ class Log(dict):
         self.me = None
         self.harvest_spot_values = None
         self.yard2defenders = {}
+        self.enemy_targ_ids = None
 
     @property
     def spots(self):  # Assigned harvest spots
@@ -246,7 +219,7 @@ class MyAgent:
             d[pos] = self.board.cells[pos].halite
         d = sorted(d, key=d.get)[::-1]
         for pos in d:
-            if pos not in LOG.set_points and not self.is_pos_occupied_by_threat(ship, pos):
+            if pos not in LOG.spots and not self.is_pos_occupied_by_threat(ship, pos):
                 return pos
         return None
 
@@ -315,9 +288,11 @@ class MyAgent:
         for action in actions:  # Adjust action weight by number of potential positive collisions - max modifier of +0.8
             ppos = ps.translate(adelta[action], self.dim)
             action_inverse = ainverse[action]
-            pcell_adjs = [self.board.cells[ppos.translate(adelta[a], self.dim)] for a in actions if a not in (action_inverse, )]
-            n_pcol = len([c for c in pcell_adjs if c.ship is not None and c.ship.player_id != self.me.id and c.ship.halite > ship.halite])
-            actions[action] = actions[action] + n_pcol/5
+            pcell_adjs = [self.board.cells[ppos.translate(adelta[a], self.dim)] for a in actions if
+                          a not in (action_inverse,)]
+            n_pcol = len([c for c in pcell_adjs if
+                          c.ship is not None and c.ship.player_id != self.me.id and c.ship.halite > ship.halite])
+            actions[action] = actions[action] + n_pcol / 5
         chosen_action = 'UNDECIDED'
         n_conditions = 4  # need to manually update this with each condition added
         best_to_worst_actions = sorted(actions, key=actions.get)[::-1]
@@ -335,7 +310,8 @@ class MyAgent:
                 is_not_occupied_by_self = (ppos not in LOG.set_points)
                 # is_not_blocking_yard = (
                 #             ship.log.role != 'DEP' and ppos not in [sy.position for sy in self.me.shipyards])
-                is_not_occupied_by_enemy_yard = not (cell.shipyard is not None and cell.shipyard.player_id != self.me.id)
+                is_not_occupied_by_enemy_yard = not (
+                            cell.shipyard is not None and cell.shipyard.player_id != self.me.id)
                 is_not_occupied_by_potential_threats = all(
                     [not self.is_pos_occupied_by_threat(ship, ppos_adj) for ppos_adj in ppos_adjs])
                 # Conditions are ordered by priority
@@ -358,6 +334,11 @@ class MyAgent:
             target_cell = ship.log.yard.position
         elif ship.log.role == 'DFND':
             target_cell = LOG.defenders2yard[ship].position
+        elif ship.log.role == 'call_home':
+            if ship.halite > 40:
+                target_cell = ship.log.yard.position
+            else:
+                target_cell = ship.log.atk_target.position
         else:
             raise BaseException(f'Need to define logic for new role: {ship.log.role}')
         if True or not ship.position == target_cell:  # always True - might change in future
@@ -385,6 +366,28 @@ class MyAgent:
         # TODO target_cell.halite_local_mean + target_cell.halite_local_std * 4
         return cond
 
+    def get_closest_opponents_by_score(self):
+        ph = {}
+        for pid, p in self.board.players.items():
+            ph[p] = p.halite + sum([s.halite for s in self.board.ships.values() if s.id == pid])
+        mh = self.me.halite + sum([s.halite for s in self.me.ships])
+        deltas = {}
+        for p, h in ph.items():
+            deltas[p] = abs(mh - h)
+        cos = sorted(deltas, key=deltas.get)
+        return cos
+
+    def get_attack_target(self, ship):
+        cos = self.get_closest_opponents_by_score()
+        sy2dist = []
+        for co in cos:
+            sy2dist.extend([(sy, self.dist(sy.position, ship.position)) for sy in co.shipyards])
+        if len(sy2dist) > 0:
+            target = sorted(sy2dist, key=lambda x: x[1])[0][0]
+        else:
+            target = None
+        return target
+
     def assign_role(self, ship):
         if ship.log.role == 'NEW':
             return 'HVST'
@@ -392,6 +395,8 @@ class MyAgent:
         if ship.log.yard is not None:
             if ship.log.role == 'DEP' and ship.position == ship.log.yard.position:
                 ship.log.role = 'HVST'
+        if self.board.step > magic['end_game_step']:
+            return 'call_home'
         if ship.log.role == 'HVST':
             temp_spot = None
             if ship.log.spot is None:
@@ -438,6 +443,10 @@ class MyAgent:
                     ship.log.spot_local = ship.log.spot
                 else:
                     raise BaseException('This should not occur.')
+        if ship.log.role == 'call_home':
+            if ship.log.atk_target is None or ship.log.atk_target.id not in LOG.enemy_targ_ids:
+                target = self.get_attack_target(ship)
+                ship.log.atk_target = target if target is not None else Ship('-1', Point(15, 15), 500, -1, self.board)
         self.determine_best_action(ship)
 
     def get_best_ship_for_yard(self):
@@ -496,7 +505,8 @@ class MyAgent:
             ship.log.p_point = None
             self.prospective_yard = Shipyard('PROSPECTIVE', ship.position, self.me.id, self.board)
         # Quick try for second SY logic
-        if self.board.step > 20 and self.board.step < magic['end_game_step'] and self.me.halite > 2000 and len(self.me.ships) > 10 and len(self.me.shipyards) == 1:
+        if self.board.step > 20 and self.board.step < magic['end_game_step'] and self.me.halite > 2000 and len(
+                self.me.ships) > 10 and len(self.me.shipyards) == 1:
             ship = self.get_best_ship_for_yard()
             if ship is not None:
                 ship.next_action = ShipAction.CONVERT
@@ -528,6 +538,11 @@ class MyAgent:
 
     def setup_stats(self):
         """Computables at start of each step. Lazily calculating adjacent positions for each position."""
+        # TODO - distinguish between sy ids and s ids
+        LOG.enemy_targ_ids = [s.id for s in self.board.ships.values() if s.player_id != self.me.id] + [sy.id for sy in
+                                                                                                       self.board.shipyards.values()
+                                                                                                       if
+                                                                                                       sy.player_id != self.me.id]
         self.halite_global_mean = int(np.mean([cell.halite for cell in self.board.cells.values() if cell.halite != 0]))
         self.halite_global_median = int(
             np.median([cell.halite for cell in self.board.cells.values() if cell.halite != 0]))
@@ -556,7 +571,8 @@ class MyAgent:
                     dist = self.dist(pos, sy_pos)
                     halite_expected = min(cell.halite * 1 + self.config.regen_rate ** dist,
                                           self.config.max_cell_halite)  # Potential on arrival
-                    halite_harvest = halite_expected * (1 - 0.75 ** est_harvest_time)  # Model expected halite after mining?
+                    halite_harvest = halite_expected * (
+                                1 - 0.75 ** est_harvest_time)  # Model expected halite after mining?
                     halite_potential = halite_harvest / (2 * dist + est_harvest_time)  # There and back again...
                 else:
                     halite_potential = -1
@@ -625,13 +641,13 @@ class MyAgent:
                              and (obs.step < 360)
         reserve = config.convertCost if obs.step > 20 else 0
         halite_left_per_ship = sum(c.halite for c in self.board.cells.values()) / (
-                    1 + len(self.board.ships))  # +1 to avoid zero div
-        print(halite_left_per_ship) if halite_left_per_ship < 400 else ...
+                1 + len(self.board.ships))  # +1 to avoid zero div
+        print(halite_left_per_ship) if halite_left_per_ship < 350 else ...
         for shipyard in me.shipyards:
             # If we can afford spawn, considering cumulation of other SY spawns and keeping a reserve for one yard.
             have_enough_halite = (me.halite - spawncount * config.spawnCost - reserve) >= config.spawnCost
             no_ship_reserved_point = shipyard.position not in LOG.set_points
-            worth_spawning = halite_left_per_ship > 400
+            worth_spawning = halite_left_per_ship > 350
             if have_enough_halite and worth_spawning and should_still_spawn and no_ship_reserved_point and self.keep_spawning_tripswitch:
                 shipyard.next_action = ShipyardAction.SPAWN
                 spawncount += 1

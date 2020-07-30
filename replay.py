@@ -2,16 +2,15 @@
 from kaggle_environments import make
 from kaggle_environments.envs.halite.helpers import *
 from kaggle_environments.utils import structify
-import argparse
-import pprint
 import json
 from pathlib import Path
 
 from utils.base import write_html
-from bots.v4 import agent
+from bots.v4 import agent  # CONFIG - IMPORT BOT
 
-path_replay = Path('./replays/1952563.json')
-myid = 2
+# CONFIG - REPLAY AND CORRESPONDING ID
+path_replay = Path('./replays/1955025.json')
+myid = 3
 
 '''
 Load a json eposode record and play a particular step with a given agent
@@ -40,7 +39,7 @@ def replay_match(path, playerid, step=0):
     # env already done - can write out full replay
     t = env.render(mode='html', return_obj=True, width=800, height=800, header=False, controls=True)
     write_html(t, 'replay.html')
-    # Need to run my agent to develop stateful values
+    # If agent carries state across turns, need to run through all steps, or can directly index into a step otherwise
     # check that we are correct player
     # print('My Id: ', board.current_player_id, board.current_player)
     print(f'Running for: {agent.__module__}')
@@ -56,8 +55,4 @@ def replay_match(path, playerid, step=0):
         print(f'step: {obs.step}')
 
 
-
-'''
-replay_match(options.file, options.step, options.id)
-'''
 replay_match(path_replay, myid)

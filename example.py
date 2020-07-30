@@ -16,6 +16,7 @@ trainer = env.train([None, 'bots/home2p1.py'])
 # env = make("halite", configuration=config, debug=True)
 # trainer = env.train([None, 'random',])
 
+
 def play():
     obs = trainer.reset()
     while not env.done:
