@@ -8,10 +8,10 @@ import json
 from pathlib import Path
 
 from utils.base import write_html
-from submissions.v2 import agent
+from bots.v4 import agent
 
-path_replay = Path('./replays/v2-1905893.json')
-
+path_replay = Path('./replays/1952563.json')
+myid = 2
 
 '''
 Load a json eposode record and play a particular step with a given agent
@@ -60,4 +60,4 @@ def replay_match(path, playerid, step=0):
 '''
 replay_match(options.file, options.step, options.id)
 '''
-replay_match(path_replay, 0)
+replay_match(path_replay, myid)

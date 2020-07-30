@@ -321,29 +321,20 @@ class MyAgent:
                 break
         return chosen_action
 
-    def determine_best_harvest_action(self, ship):
-        if not ship.position == ship.log.spot_local:
-            ship.log.p_action = self.move_to_target(ship, ship.log.spot_local)
-            if ship.log.p_action != ShipAction.CONVERT:  # Will only convert if there are no safe moves.
-                ship.log.p_point = ship.position.translate(adelta[ship.log.p_action], self.dim)
-            else:
-                ship.log.set_action = ShipAction.CONVERT
-                ship.next_action = ShipAction.CONVERT
-        else:  # harvest - identical for now!
-            ship.log.p_action = self.move_to_target(ship, ship.log.spot_local)
-            if ship.log.p_action != ShipAction.CONVERT:  # Will only convert if there are no safe moves.
-                ship.log.p_point = ship.position.translate(adelta[ship.log.p_action], self.dim)
-            else:
-                ship.log.set_action = ShipAction.CONVERT
-                ship.next_action = ShipAction.CONVERT
-
-    def determine_best_deposit_action(self, ship):
-        # yard_position = ship.log.yard.position if ship.log.yard.position is not None else self.prospective_yard
-        if not ship.position == ship.log.yard.position:  # move to spot
-            ship.log.p_action = self.move_to_target(ship, ship.log.yard.position)
-            ship.log.p_point = ship.position.translate(adelta[ship.log.p_action], self.dim)
+    def determine_best_action(self, ship):
+        if ship.log.role == 'HVST':
+            target_cell = ship.log.spot_local
+        elif ship.log.role == 'DEP':
+            target_cell = ship.log.yard.position
         else:
-            raise BaseException('depositor but ship is on yard pos and didnt switch role?')
+            raise BaseException(f'Need to define logic for new role: {ship.log.role}')
+        if True or not ship.position == target_cell:  # always True - might change in future
+            ship.log.p_action = self.move_to_target(ship, target_cell)
+            if ship.log.p_action != ShipAction.CONVERT:  # Will only convert if there are no safe moves.
+                ship.log.p_point = ship.position.translate(adelta[ship.log.p_action], self.dim)
+            else:
+                ship.log.set_action = ShipAction.CONVERT
+                ship.next_action = ShipAction.CONVERT
 
     def determine_ship_action(self, ship):
         """Harvest/Deposit cycle"""
@@ -376,9 +367,9 @@ class MyAgent:
             if ship.halite > (target_cell.halite_local_mean * 4):
                 ship.log.role = 'DEP'
             else:
-                self.determine_best_harvest_action(ship)
+                self.determine_best_action(ship)
         if ship.log.role == 'DEP':
-            self.determine_best_deposit_action(ship)
+            self.determine_best_action(ship)
 
     def get_best_ship_for_yard(self):
         """If building a yard after losing the only one:

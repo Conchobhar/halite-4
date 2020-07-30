@@ -8,11 +8,13 @@ np.seterr(all='raise')
 """NEXT
     -live
         -call home
-        -target closest player by score
+        -target yards
         -chaser role
         -dont hemmorrage syards at end of game
         -4*mean cond change
-    
+    -1929130.json
+        -152 - trio blockage at (10,~12)
+
     - Changes to validate in isolation
     Go home logic
                 < if ship.halite > (target_cell.halite_local_mean * 4):
@@ -30,6 +32,10 @@ np.seterr(all='raise')
     -improve next move logic
         - consider halite in cells incase ship ends up waiting
         - consider desirable collisions
+
+    -endgame
+        call home
+        swarm top player
 
     -build extra yard at some point
     if step > 20 and halite > reserve + shipspawn + yardspawn and nyards < 2:
@@ -56,8 +62,7 @@ np.seterr(all='raise')
     'set_point'  Confirmed resultant point (from action)
     """
 magic = {
-    'turn_to_enable_defenders': 300,  # Use this if defending is causing issues
-    'end_game_step': 350,  # Change ship behaviour for end game
+    'turn_to_enable_defenders': 300,
 }
 
 # Map move action to positional delta
@@ -152,8 +157,7 @@ class Log(dict):
 
     @property
     def defenders2yard(self):  # Get inverse dict
-        return {v:k for k,v in self.yard2defenders.items()}
-
+        return {v: k for k, v in self.yard2defenders.items()}
 
 
 global LOG
@@ -320,9 +324,11 @@ class MyAgent:
         for action in actions:  # Adjust action weight by number of potential positive collisions - max modifier of +0.8
             ppos = ps.translate(adelta[action], self.dim)
             action_inverse = ainverse[action]
-            pcell_adjs = [self.board.cells[ppos.translate(adelta[a], self.dim)] for a in actions if a not in (action_inverse, )]
-            n_pcol = len([c for c in pcell_adjs if c.ship is not None and c.ship.player_id != self.me.id and c.ship.halite > ship.halite])
-            actions[action] = actions[action] + n_pcol/5
+            pcell_adjs = [self.board.cells[ppos.translate(adelta[a], self.dim)] for a in actions if
+                          a not in (action_inverse,)]
+            n_pcol = len([c for c in pcell_adjs if
+                          c.ship is not None and c.ship.player_id != self.me.id and c.ship.halite > ship.halite])
+            actions[action] = actions[action] + n_pcol / 5
         chosen_action = 'UNDECIDED'
         n_conditions = 4  # need to manually update this with each condition added
         best_to_worst_actions = sorted(actions, key=actions.get)[::-1]
@@ -340,7 +346,8 @@ class MyAgent:
                 is_not_occupied_by_self = (ppos not in LOG.set_points)
                 # is_not_blocking_yard = (
                 #             ship.log.role != 'DEP' and ppos not in [sy.position for sy in self.me.shipyards])
-                is_not_occupied_by_enemy_yard = not (cell.shipyard is not None and cell.shipyard.player_id != self.me.id)
+                is_not_occupied_by_enemy_yard = not (
+                            cell.shipyard is not None and cell.shipyard.player_id != self.me.id)
                 is_not_occupied_by_potential_threats = all(
                     [not self.is_pos_occupied_by_threat(ship, ppos_adj) for ppos_adj in ppos_adjs])
                 # Conditions are ordered by priority
@@ -377,8 +384,8 @@ class MyAgent:
         # **n harvests under local mean? OR if nearby threat on spot? try somewhere else
         target_cell = self.board.cells[ship.log.spot]
         cond = (target_cell.halite < target_cell.halite_local_mean * 0.75 ** 1) \
-            or self.dist(ship.position, target_cell.position) <= 2 \
-            and self.is_pos_occupied_by_threat(ship, target_cell.position)
+               or self.dist(ship.position, target_cell.position) <= 2 \
+               and self.is_pos_occupied_by_threat(ship, target_cell.position)
         return cond
 
     def is_overharvested_globally(self, ship, target_cell):
@@ -397,8 +404,6 @@ class MyAgent:
         if ship.log.yard is not None:
             if ship.log.role == 'DEP' and ship.position == ship.log.yard.position:
                 ship.log.role = 'HVST'
-        if self.board.step > magic['end_game_step']:
-            return 'call_home'
         if ship.log.role == 'HVST':
             temp_spot = None
             if ship.log.spot is None:
@@ -522,9 +527,9 @@ class MyAgent:
             if len(enemy_adj) > 0 and sy not in LOG.yard2defenders:
                 print(f'\n\tNearby enemy: {enemy_adj[0].id} at P{enemy_adj[0].position}\n')
                 nearby_candidates_by_dist = [(s, self.dist(s.position, sy.position))
-                               for s in self.me.ships
-                               if self.dist(s.position, sy.position) <= radius
-                               and s.log.role != 'DFND']
+                                             for s in self.me.ships
+                                             if self.dist(s.position, sy.position) <= radius
+                                             and s.log.role != 'DFND']
                 nearby_candidates_by_dist = sorted(nearby_candidates_by_dist, key=lambda x: x[1])
                 if len(nearby_candidates_by_dist) > 0:
                     ship = nearby_candidates_by_dist[0][0]
@@ -563,7 +568,8 @@ class MyAgent:
                     dist = self.dist(pos, sy_pos)
                     halite_expected = min(cell.halite * 1 + self.config.regen_rate ** dist,
                                           self.config.max_cell_halite)  # Potential on arrival
-                    halite_harvest = halite_expected * (1 - 0.75 ** est_harvest_time)  # Model expected halite after mining?
+                    halite_harvest = halite_expected * (
+                                1 - 0.75 ** est_harvest_time)  # Model expected halite after mining?
                     halite_potential = halite_harvest / (2 * dist + est_harvest_time)  # There and back again...
                 else:
                     halite_potential = -1
@@ -631,7 +637,8 @@ class MyAgent:
         should_still_spawn = ((len(me.ships) <= nships_other + 2) or (obs.step < 20)) \
                              and (obs.step < 360)
         reserve = config.convertCost if obs.step > 20 else 0
-        halite_left_per_ship = sum(c.halite for c in self.board.cells.values())/(1 + len(self.board.ships))  # +1 to avoid zero div
+        halite_left_per_ship = sum(c.halite for c in self.board.cells.values()) / (
+                    1 + len(self.board.ships))  # +1 to avoid zero div
         print(halite_left_per_ship) if halite_left_per_ship < 400 else ...
         for shipyard in me.shipyards:
             # If we can afford spawn, considering cumulation of other SY spawns and keeping a reserve for one yard.
