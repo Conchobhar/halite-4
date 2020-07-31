@@ -6,12 +6,12 @@ import json
 from pathlib import Path
 
 from utils.base import write_html
-from bots.v6 import agent  # CONFIG - IMPORT BOT
+from bots.v7 import agent  # CONFIG - IMPORT BOT
 
 # CONFIG - REPLAY AND CORRESPONDING ID
 path_replay = Path('./replays/1955025.json')
-path_replay = Path('/home/xu/Downloads/1980653.json')
-myid = 0
+path_replay = Path('/home/xu/Downloads/1984103.json')
+myid = 1
 
 131
 pos = (2, 5)

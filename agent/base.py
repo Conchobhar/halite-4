@@ -65,7 +65,8 @@ np.seterr(all='raise')
     """
 magic = {
     'turn_to_enable_defenders': 300,  # Use this if defending is causing issues
-    'end_game_step': 360,  # Change ship behaviour for end game
+    'end_game_step': 380,  # Change ship behaviour for end game
+    'evade_ship_count': 50,  # How many ships any opponent needs to engage evasion
 }
 
 # Map move action to positional delta
@@ -212,6 +213,7 @@ class MyAgent:
         self.quadrant_adjs = set(self.get_adjs(self.quadrant_position, r=1))
         self.harvest_spot_values = None
         self.enemy_ship_points = None
+        self.p2net_halite = {}
         self.halite_global_mean = None
         self.halite_global_median = None
         self.halite_global_std = None
@@ -220,7 +222,6 @@ class MyAgent:
         self.yardcount = None
         self.prospective_yard = None
         self.action_iter = None
-        self.keep_spawning_tripswitch = True
         self.cell_halite_minimum = None
         self.ship_carry_maximum = None  # calculated at start of each loop
         self.halite_harvest_minimum = None
@@ -366,6 +367,8 @@ class MyAgent:
             pcell_adjs = [self.board.cells[ppos.translate(adelta[a], self.dim)] for a in actions if a not in (action_inverse, )]
             n_pcol = len([c for c in pcell_adjs if c.ship is not None and c.ship.player_id != self.me.id and c.ship.halite > ship.halite])
             actions[action] = actions[action] + n_pcol/5
+        maybe_yard = self.board.cells[ps].shipyard
+        actions['WAIT'] = actions['WAIT'] - 1 if maybe_yard is not None else actions['WAIT']  # Penalty for waiting about on yards
         chosen_action = 'UNDECIDED'
         cond_iter, conditions = 0, {}
         role_conditions = self.role2conditions[ship.log.role]
@@ -381,8 +384,8 @@ class MyAgent:
                 # not occupied by enemy ship with less halite
                 conditions['is_not_occupied_by_threat'] = not self.is_pos_occupied_by_threat(ship, ppos)
                 conditions['is_not_occupied_by_self'] = (ppos not in LOG.set_points)
-                conditions['is_not_waiting_on_yard'] = (
-                            ship.log.role != 'DEP' and action == 'WAIT' and ppos not in [sy.position for sy in self.me.shipyards])
+                conditions['is_not_waiting_on_yard'] = (True if action != 'WAIT' else
+                        ship.log.role != 'DEP' and ppos not in [sy.position for sy in self.me.shipyards])
                 conditions['is_not_occupied_by_enemy_yard'] = not (cell.shipyard is not None and cell.shipyard.player_id != self.me.id)
                 conditions['is_not_occupied_by_potential_threats'] = all(
                     [not self.is_pos_occupied_by_threat(ship, ppos_adj) for ppos_adj in ppos_adjs])
@@ -398,18 +401,36 @@ class MyAgent:
                 break
         return chosen_action
 
+    def get_spot_with_least_threat(self, ship):
+        """Threat is count of threatening ships within some large radius.
+        Don't consider waiting on current pos - want to maintain minimum halite"""
+        pos2threat = {}
+        for pos in self.get_adjs(ship.position, r=1):
+            pos2threat[pos] = len([c for c in self.get_adjs(ship.position, r=5)
+                                   if c.ship is not None and c.ship.halite <= ship.halite])
+        return sorted(pos2threat, key=pos2threat.get)[0]
+
     def determine_best_action(self, ship):
         if ship.log.role == 'HVST':
             target_cell = ship.log.spot_local
         elif ship.log.role == 'DEP':
             target_cell = ship.log.yard.position
-        elif ship.log.role == 'DFND':
-            target_cell = LOG.defenders2yard[ship].position
+        elif ship.log.role == 'DFND':  # Get to zero halite, move to yard if enemy adjacent
+            sy = LOG.defenders2yard[ship]
+            if ship.halite > 0 or len(self.get_adj_enemies(sy.position, radius=1)) > 0:  # otherwise move towards nearest enemy ship
+                target_cell = sy.position
+            else:
+                target_cell = self.get_closest_enemy_ship(ship.position).position
         elif ship.log.role == 'call_home':
             if ship.halite > 40:
                 target_cell = ship.log.yard.position
             else:
-                target_cell = ship.log.atk_target.position
+                target_cell = self.get_spot_with_least_threat(ship)
+        elif ship.log.role == 'evade':  # Deposit to maximize own threat, else move to spot with minimal threat
+            if ship.halite > 0:
+                target_cell = ship.log.yard.position
+            else:
+                target_cell = self.get_spot_with_least_threat(ship)
         else:
             raise BaseException(f'Need to define logic for new role: {ship.log.role}')
         if True or not ship.position == target_cell:  # always True - might change in future
@@ -440,13 +461,10 @@ class MyAgent:
         return cond
 
     def get_closest_opponents_by_score(self):
-        ph = {}
-        for pid, p in self.board.players.items():
-            ph[p] = p.halite + sum([s.halite for s in self.board.ships.values() if s.id == pid])
-        mh = self.me.halite + sum([s.halite for s in self.me.ships])
         deltas = {}
-        for p,h in ph.items():
-            deltas[p] = abs(mh - h)
+        mh = self.me.halite + sum([s.halite for s in self.me.ships])
+        for pid, p in self.board.players.items():
+            deltas[p] = abs(mh - p.halite + sum([s.halite for s in self.board.ships.values() if s.id == pid]))
         cos = sorted(deltas, key=deltas.get)
         return cos
 
@@ -470,6 +488,10 @@ class MyAgent:
                 ship.log.role = 'HVST'
         if self.board.step > magic['end_game_step']:
             return 'call_home'
+        am_in_lead = all([self.me.halite > net for p, net in self.p2net_halite.items() if p.id != self.me.id])
+        any_e_has_40_ships = any([len(p.ships) >= magic['evade_ship_count'] for p in self.board.players.values() if p.id != self.me.id])
+        if am_in_lead and any_e_has_40_ships:
+            return 'evade'
         if ship.log.role == 'HVST':
             temp_spot = ship.log.spot
             if temp_spot is None:
@@ -495,7 +517,7 @@ class MyAgent:
                 else:
                     return 'DFND'
             else:
-                print(f'WARNING: ship {ship.id}:{ship.position} was DFND but no longer in LOG. Was yard destoryed?')
+                print(f'WARNING: ship {ship.id}:{ship.position} was DFND but no longer in LOG. Was yard destroyed?')
                 return ship.log.role_suspended
         return ship.log.role
 
@@ -593,6 +615,12 @@ class MyAgent:
                 and c.ship.player_id != self.me.id
                 and c.ship.halite < halite_min]
 
+    def get_closest_enemy_ship(self, pos):
+        ships_by_dist = sorted(
+            [(ship, self.dist(pos, ship.position)) for plr in self.board.players.values()
+             if plr is not self.me for ship in plr.ships], key=lambda x:x[1])
+        return ships_by_dist[0][0]
+
     def start_of_turn_yard_defending(self, radius=1):
         for sy in self.me.shipyards:
             enemy_adj = self.get_adj_enemies(sy.position, radius=radius)
@@ -620,6 +648,9 @@ class MyAgent:
             np.median([cell.halite for cell in self.board.cells.values() if cell.halite != 0]))
         self.halite_global_std = int(np.std([cell.halite for cell in self.board.cells.values() if cell.halite != 0]))
         self.global_min_requirement_to_harvest = self.halite_global_mean - self.halite_global_std
+
+        for pid, p in self.board.players.items():
+            self.p2net_halite[p] = p.halite + sum([s.halite for s in self.board.ships.values()])
         # g = np.ndarray([self.dim, self.dim])
         self.halite_density = {}
         cells = self.board.cells
@@ -635,7 +666,7 @@ class MyAgent:
         if self.yardcount > 0:
             d = OrderedDict()
             pos_yards = {x.cell.position for x in self.board.shipyards.values()}
-            est_harvest_time = 3
+            est_harvest_time = 2
             exclude_points = set(self.quadrant_adjs)
             for pos, cell in self.board.cells.items():
                 # Exclude points outside of defined quadrant, yards, and the points immediate to the first shipyard
@@ -706,7 +737,8 @@ class MyAgent:
                     priority_ship.log.set_action, priority_ship.log.set_point = action, point
 
         # Ship building
-        h2ns = [(p.halite, len(p.ships)) for p in self.board.players.values() if p.id is not me.id]
+        h2ns = [(p.halite + sum([s.halite for s in self.board.ships.values() if s.player_id == me.id])
+                 , len(p.ships)) for p in self.board.players.values() if p.id is not me.id]
         nships_other = sorted(h2ns, key=lambda x: -x[0])[0][1]
         should_still_spawn = ((len(me.ships) <= nships_other + 2) or (obs.step < 30)
                               if (obs.step < magic['end_game_step']) else len(me.ships) < 5)
@@ -717,8 +749,8 @@ class MyAgent:
             # If we can afford spawn, considering cumulation of other SY spawns and keeping a reserve for one yard.
             have_enough_halite = (me.halite - spawncount * config.spawnCost - reserve) >= config.spawnCost
             no_ship_reserved_point = shipyard.position not in LOG.set_points
-            worth_spawning = halite_left_per_ship > 350
-            if have_enough_halite and worth_spawning and should_still_spawn and no_ship_reserved_point and self.keep_spawning_tripswitch:
+            worth_spawning = True #  halite_left_per_ship > 350  TODO do I need this?
+            if have_enough_halite and worth_spawning and should_still_spawn and no_ship_reserved_point:
                 shipyard.next_action = ShipyardAction.SPAWN
                 spawncount += 1
         self.board_prev = self.board
