@@ -11,7 +11,7 @@ from bots import v1, home2p1
 1695788596 - t5 gridflock - can be fixed with  pathing"""
 config = {"size": 21, "startingHalite": 24000, "randomSeed": 824666594}
 env = make("halite", configuration=config, debug=True)
-trainer = env.train([None, 'bots/home2p1.py'])
+trainer = env.train([None, 'bots/home2p1.py', 'random', 'random'])
 # config = {"size": 21, "startingHalite": 24000, "randomSeed": 824666594}
 # env = make("halite", configuration=config, debug=True)
 # trainer = env.train([None, 'random',])

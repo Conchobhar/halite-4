@@ -20,7 +20,7 @@ np.seterr(all='raise')
     """
 magic = {
     'turn_to_enable_defenders': 300,  # Use this if defending is causing issues
-    'end_game_step': 10,  # Change ship behaviour for end game
+    'end_game_step': 360,  # Change ship behaviour for end game
 }
 
 # Map move action to positional delta

@@ -6,11 +6,15 @@ import json
 from pathlib import Path
 
 from utils.base import write_html
-from bots.v4 import agent  # CONFIG - IMPORT BOT
+from bots.v6 import agent  # CONFIG - IMPORT BOT
 
 # CONFIG - REPLAY AND CORRESPONDING ID
 path_replay = Path('./replays/1955025.json')
-myid = 3
+path_replay = Path('/home/xu/Downloads/1980653.json')
+myid = 0
+
+131
+pos = (2, 5)
 
 '''
 Load a json eposode record and play a particular step with a given agent
