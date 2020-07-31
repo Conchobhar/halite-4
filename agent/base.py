@@ -114,7 +114,7 @@ role2conditions = {
     'call_home': OrderedDict({
         'is_not_occupied_by_threat': 0,
         'is_not_occupied_by_self': 1,
-        'is_not_blocking_yard': 2,  # Don't block yard at call home!
+        'is_not_waiting_on_yard': 2,  # Don't block yard at call home!
         'is_not_occupied_by_enemy_yard': 3,
         'is_not_occupied_by_potential_threats': 4,
     }),
@@ -312,8 +312,6 @@ class MyAgent:
             if cell.halite > self.global_min_requirement_to_harvest:
                 return spot
         # TODO - roles - assault
-        self.keep_spawning_tripswitch = False
-        print("\n\n****************\n\tkeep_spawning_tripswitch flipped to False\n****************\n\n")
         # Share spots in this case
         spots_with_min_halite = [spot for spot, value in self.harvest_spot_values]
         for spot, value in spots_with_min_halite:
@@ -383,8 +381,8 @@ class MyAgent:
                 # not occupied by enemy ship with less halite
                 conditions['is_not_occupied_by_threat'] = not self.is_pos_occupied_by_threat(ship, ppos)
                 conditions['is_not_occupied_by_self'] = (ppos not in LOG.set_points)
-                conditions['is_not_blocking_yard'] = (
-                            ship.log.role != 'DEP' and ppos not in [sy.position for sy in self.me.shipyards])
+                conditions['is_not_waiting_on_yard'] = (
+                            ship.log.role != 'DEP' and action == 'WAIT' and ppos not in [sy.position for sy in self.me.shipyards])
                 conditions['is_not_occupied_by_enemy_yard'] = not (cell.shipyard is not None and cell.shipyard.player_id != self.me.id)
                 conditions['is_not_occupied_by_potential_threats'] = all(
                     [not self.is_pos_occupied_by_threat(ship, ppos_adj) for ppos_adj in ppos_adjs])
@@ -710,13 +708,11 @@ class MyAgent:
         # Ship building
         h2ns = [(p.halite, len(p.ships)) for p in self.board.players.values() if p.id is not me.id]
         nships_other = sorted(h2ns, key=lambda x: -x[0])[0][1]
-        # TODO - +5 ships here is arbitrary
-        should_still_spawn = ((len(me.ships) <= nships_other + 2) or (obs.step < 20)) \
-                             and (obs.step < 360)
+        should_still_spawn = ((len(me.ships) <= nships_other + 2) or (obs.step < 30)
+                              if (obs.step < magic['end_game_step']) else len(me.ships) < 5)
         reserve = config.convertCost if obs.step > 20 else 0
         halite_left_per_ship = sum(c.halite for c in self.board.cells.values()) / (
                     1 + len(self.board.ships))  # +1 to avoid zero div
-        print(halite_left_per_ship) if halite_left_per_ship < 350 else ...
         for shipyard in me.shipyards:
             # If we can afford spawn, considering cumulation of other SY spawns and keeping a reserve for one yard.
             have_enough_halite = (me.halite - spawncount * config.spawnCost - reserve) >= config.spawnCost
