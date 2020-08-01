@@ -1,26 +1,26 @@
 """NEXT
     -live
-        -send to zones rather than spots
-        -once at zone, pick best spot
-        -optimize spot on each turn - if ship moves to avoid collision, drop sopt
-    -issues
+        - choose local harvest spot better
+        - choose global harvbets spot better
     cal global self ship density and enemy ship density
+    normalize threat - median ship halite is zero point
     each spot weighted by ((myships + 1)/(myships + 1 + eships)
         if only my ships, weight is 1
         if no ships weight is one
         only enemy, weight is zero
 
+        -choose requirements better for overharvesting
+        -
+
 
         ships spread to sparsely - should weight spots by n enemy ship density
 
-    -frustration
-        - increment if avoiding an enemy prevents best move. if >n, deposit
-        - waiting while not on pos
-        - waiting while not on pos and DEP
-            - if depositing, and other sy avail, go to it
-        -chaser role
-        -dont hemmorrage syards at end of game
-        -4*mean cond change
+    -ZONES
+        -send to zones rather than spots
+        -once at zone, pick best spot
+        -optimize spot on each turn - if ship moves to avoid collision, drop sopt
+    -issues
+
 
     - Changes to validate in isolation
     Go home logic
@@ -34,15 +34,9 @@
         exclude spots below a threshold - more valuable to protect spots than harvest
         calculate est. harvest time on cell as time taken to reduce spot to e.g. 50
 
-    -improve next move logic
-        - consider halite in cells incase ship ends up waiting
+    -Maintain extra yards
+        - if halite > 2k
 
-    -build extra yard at some point
-    if step > 20 and halite > reserve + shipspawn + yardspawn and nyards < 2:
-        build yard at midpoint of most halite dense spot and yard 1
-
-    -shipbuilding
-        if nstep < 300 and totalHalite/4 > 2000
 
     -each ship should have its own threat modifier for cells
         -ve if ship.halite < avg. enemy

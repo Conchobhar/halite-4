@@ -15,4 +15,7 @@ else
       cat changelog.txt agent/base.py  > submission.py
       cp submission.py "$bot"
   fi
+  echo "Creating $bot..."
+  cat changelog.txt agent/base.py  > submission.py
+  cp submission.py "$bot"
 fi

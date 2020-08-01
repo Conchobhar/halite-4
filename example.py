@@ -4,7 +4,7 @@ from kaggle_environments import evaluate, make
 from time import time
 from utils.base import write_html
 from agent.base import agent
-from bots import v1, home2p1
+from bots import v8, home2p1
 
 """SEEDS
 """
