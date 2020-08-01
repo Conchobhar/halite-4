@@ -3,18 +3,21 @@ from kaggle_environments import make
 from kaggle_environments.envs.halite.helpers import *
 from kaggle_environments.utils import structify
 import json
+import os
 from pathlib import Path
 
 from utils.base import write_html
 from bots.v7 import agent  # CONFIG - IMPORT BOT
 
 # CONFIG - REPLAY AND CORRESPONDING ID
-path_replay = Path('./replays/1955025.json')
-path_replay = Path('/home/xu/Downloads/1984103.json')
-myid = 1
+pathdl = Path('/home/xu/Downloads/')
+# path_replay = pathdl / '1984103.json'
+paths = pathdl.glob('*.json')
+path_replay = max(paths, key=lambda p:p.stat().st_ctime)
+myid = 2
 
-131
-pos = (2, 5)
+
+
 
 '''
 Load a json eposode record and play a particular step with a given agent

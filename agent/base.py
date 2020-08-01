@@ -5,55 +5,6 @@ from itertools import combinations, product
 import numpy as np
 
 np.seterr(all='raise')
-"""NEXT
-    -live
-        -call home
-        -target closest player by score
-        -extend quadrant space with shipyards
-            -
-        -ships should group with a lag in halite carried to better control a zone
-        -frustration
-            - increment if avoiding an enemy prevents best move. if >n, deposit
-            - waiting while not on pos
-            - waiting while not on pos and DEP
-                - if depositing, and other sy avail, go to it
-        -chaser role
-        -dont hemmorrage syards at end of game
-        -4*mean cond change
-    
-    - Changes to validate in isolation
-    Go home logic
-                < if ship.halite > (target_cell.halite_local_mean * 4):
-                > if ship.halite > (target_cell.halite_local_mean + target_cell.halite_local_std * ???):
-                or 
-                > if ship.halite > (ship.halite / target_cell.halite_local_sum > 1 ???)
-
-
-
-    -improve harvest logic
-        if spot.halite < threshold, go to nearby spot Why is ship returning home so early?
-        exclude spots below a threshold - more valuable to protect spots than harvest 
-        calculate est. harvest time on cell as time taken to reduce spot to e.g. 50
-
-    -improve next move logic
-        - consider halite in cells incase ship ends up waiting
-        - consider desirable collisions
-
-    -build extra yard at some point
-    if step > 20 and halite > reserve + shipspawn + yardspawn and nyards < 2:
-        build yard at midpoint of most halite dense spot and yard 1
-
-    -shipbuilding
-        if nstep < 300 and totalHalite/4 > 2000
-
-    -each ship should have its own threat modifier for cells
-        -ve if ship.halite < avg. enemy
-        +ve if ship.halite > avg. enemy
-
-    -advanced pathing to avoid threat dense areas
-
-    -assault role, enabled when not worth mining
-"""
 
 """Items for ship log
     'role'       What is ships purpose?
@@ -64,9 +15,10 @@ np.seterr(all='raise')
     'set_point'  Confirmed resultant point (from action)
     """
 magic = {
-    'turn_to_enable_defenders': 300,  # Use this if defending is causing issues
+    'turn_to_enable_defenders': 0,  # Use this if defending is causing issues
     'end_game_step': 380,  # Change ship behaviour for end game
     'evade_ship_count': 50,  # How many ships any opponent needs to engage evasion
+    'frustration_max': 5,  # how many harvest turns waiting around/ avoiding enemies before depositing.
 }
 
 # Map move action to positional delta
@@ -93,6 +45,18 @@ pid2quadrant = {
     3: Point(15, 5)
 }
 
+"""Role descriptions
+*Defender
+    if any enemy within radius of 1 of yard
+        if any ships within same radius, set to dfnd
+    
+    if dfnd has some halite OR any enemies within rad 1 goto yard
+        else goto eship
+    
+    dfnd gets move priority
+    
+*evader
+"""
 role2conditions = {
     'HVST': OrderedDict({
         'is_not_occupied_by_threat': 0,
@@ -135,6 +99,7 @@ class LogEntry:
         self.p_point = None
         self.set_action = None
         self.set_point = None
+        self.frustration = 0
         self.atk_target = None
         self.resetable_names = ['p_action', 'p_point', 'set_action', 'set_point', ]
 
@@ -339,18 +304,7 @@ class MyAgent:
             is_occupied_by_threat = False
         return is_occupied_by_threat
 
-    def move_to_target(self, ship, pt):
-        """Normalize coordinates and determine best action for approaching target.
-        ship - ship moving
-        pt - pos of target
-        ps - pos of ship
-        Normalize:  translate origin to ps (i.e. subtract ps from pt)
-                    map higher half coords to -ve values
-        Avoid actions that are potentially unsafe
-
-        Ideally would rate every option based on threats vs potential to win encounter.
-        """
-        # TODO maybe - prioritize based on ship threat density
+    def get_best2worst_actions(self, ship, pt):
         ps = ship.position
         pnorm = (self.map_cyclic_coords(pt[0] - ps[0]),
                  self.map_cyclic_coords(pt[1] - ps[1]))
@@ -367,19 +321,35 @@ class MyAgent:
             pcell_adjs = [self.board.cells[ppos.translate(adelta[a], self.dim)] for a in actions if a not in (action_inverse, )]
             n_pcol = len([c for c in pcell_adjs if c.ship is not None and c.ship.player_id != self.me.id and c.ship.halite > ship.halite])
             actions[action] = actions[action] + n_pcol/5
+        best_to_worst_actions = sorted(actions, key=actions.get)[::-1]
         maybe_yard = self.board.cells[ps].shipyard
         actions['WAIT'] = actions['WAIT'] - 1 if maybe_yard is not None else actions['WAIT']  # Penalty for waiting about on yards
+        return best_to_worst_actions
+
+    def move_to_target(self, ship, pt):
+        """Normalize coordinates and determine best action for approaching target.
+        ship - ship moving
+        pt - pos of target
+        ps - pos of ship
+        Normalize:  translate origin to ps (i.e. subtract ps from pt)
+                    map higher half coords to -ve values
+        Avoid actions that are potentially unsafe
+
+        Ideally would rate every option based on threats vs potential to win encounter.
+        """
+        # TODO maybe - prioritize based on ship threat density
+        ps = ship.position
+        best_to_worst_actions = self.get_best2worst_actions(ship, pt)
         chosen_action = 'UNDECIDED'
         cond_iter, conditions = 0, {}
         role_conditions = self.role2conditions[ship.log.role]
-        best_to_worst_actions = sorted(actions, key=actions.get)[::-1]
         while chosen_action == 'UNDECIDED':
             # for each possible action, in order of preference, determine if safe
             # If no action is safe, reduce the amount safety conditions until no options are left
             for action in best_to_worst_actions:
                 ppos = ps.translate(adelta[action], self.dim)
-                ppos_adjs = [ppos.translate(adelta[a], self.dim) for a in actions if a not in (None, action_inverse)]
                 action_inverse = ainverse[action]
+                ppos_adjs = [ppos.translate(adelta[a], self.dim) for a in best_to_worst_actions if a not in (None, action_inverse)]
                 cell = self.board.cells[ppos]
                 # not occupied by enemy ship with less halite
                 conditions['is_not_occupied_by_threat'] = not self.is_pos_occupied_by_threat(ship, ppos)
@@ -406,7 +376,7 @@ class MyAgent:
         Don't consider waiting on current pos - want to maintain minimum halite"""
         pos2threat = {}
         for pos in self.get_adjs(ship.position, r=1):
-            pos2threat[pos] = len([c for c in self.get_adjs(ship.position, r=5)
+            pos2threat[pos] = len([c for c in self.get_adjs(ship.position, r=5, return_cells=True)
                                    if c.ship is not None and c.ship.halite <= ship.halite])
         return sorted(pos2threat, key=pos2threat.get)[0]
 
@@ -435,6 +405,18 @@ class MyAgent:
             raise BaseException(f'Need to define logic for new role: {ship.log.role}')
         if True or not ship.position == target_cell:  # always True - might change in future
             ship.log.p_action = self.move_to_target(ship, target_cell)
+            best_actions = self.get_best2worst_actions(ship,target_cell)
+            best_action = best_actions[0]
+            ppos = ship.position.translate(adelta[best_action], self.dim)
+            action_inverse = ainverse[best_action]
+            ppos_adjs = [ppos.translate(adelta[a], self.dim) for a in best_actions if a not in (None, action_inverse)]
+            if ship.log.p_action != best_action and any(
+                    [self.is_pos_occupied_by_threat(ship, ppos_adj) for ppos_adj in ppos_adjs]):
+                ship.log.frustration += 1
+            elif ship.log.p_action != best_action and ship.log.p_action == 'WAIT':
+                ship.log.frustration += 1
+            else:  # reduce frustration, back to zero.
+                ship.log.frustration = max(ship.log.frustration - 1, 0)
             if ship.log.p_action != ShipAction.CONVERT:  # Will only convert if there are no safe moves.
                 ship.log.p_point = ship.position.translate(adelta[ship.log.p_action], self.dim)
             else:
@@ -480,12 +462,13 @@ class MyAgent:
         return target
 
     def assign_role(self, ship):
+        """RETURN a new role"""
         if ship.log.role == 'NEW':
             return 'HVST'
         # Finished deposit? Return to harvest
         if ship.log.yard is not None:
             if ship.log.role == 'DEP' and ship.position == ship.log.yard.position:
-                ship.log.role = 'HVST'
+                return 'HVST'
         if self.board.step > magic['end_game_step']:
             return 'call_home'
         am_in_lead = all([self.me.halite > net for p, net in self.p2net_halite.items() if p.id != self.me.id])
@@ -493,6 +476,8 @@ class MyAgent:
         if am_in_lead and any_e_has_40_ships:
             return 'evade'
         if ship.log.role == 'HVST':
+            if ship.log.frustration > magic['frustration_max']:
+                return 'DEP'
             temp_spot = ship.log.spot
             if temp_spot is None:
                 temp_spot = self.determine_best_harvest_spot_from_yard(ship)
@@ -583,14 +568,17 @@ class MyAgent:
             # pos = pid2quadrant[lowest_ph_pids]
 
     @lru_cache(maxsize=21 ** 2)
-    def get_adjs(self, p, r=2):
+    def get_adjs(self, p, r=2, return_cells=False):
         coords = [x for x in range(-r, r + 1)]
         # Get product of coords where sum of abs values is <= radius of average area
         # Mod to map coord space
         adjs = [x for x in product(coords, coords) if sum([abs(c) for c in x]) <= r]
         adjs.remove((0, 0))
         pos_adjs = [((p + x) % self.dim) for x in adjs]
-        return pos_adjs
+        if return_cells:
+            return [self.board.cells[p] for p in pos_adjs]
+        else:
+            return pos_adjs
 
     def start_of_turn_yard_spawning(self):
         # If no yards, create and mark point
@@ -692,6 +680,7 @@ class MyAgent:
         self.enemy_ship_points = [ship.position for plr in self.board.players.values()
                                   if plr is not self.me for ship in plr.ships]
 
+    """                     GET ACTIONS                 """
     def get_actions(self, obs, config):
         """Main loop"""
         self.board = Board(obs, config)
