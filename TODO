@@ -1,0 +1,54 @@
+"""NEXT
+    -live
+        -send to zones rather than spots
+        -once at zone, pick best spot
+        -optimize spot on each turn - if ship moves to avoid collision, drop sopt
+    -issues
+    cal global self ship density and enemy ship density
+    each spot weighted by ((myships + 1)/(myships + 1 + eships)
+        if only my ships, weight is 1
+        if no ships weight is one
+        only enemy, weight is zero
+
+
+        ships spread to sparsely - should weight spots by n enemy ship density
+
+    -frustration
+        - increment if avoiding an enemy prevents best move. if >n, deposit
+        - waiting while not on pos
+        - waiting while not on pos and DEP
+            - if depositing, and other sy avail, go to it
+        -chaser role
+        -dont hemmorrage syards at end of game
+        -4*mean cond change
+
+    - Changes to validate in isolation
+    Go home logic
+                < if ship.halite > (target_cell.halite_local_mean * 4):
+                > if ship.halite > (target_cell.halite_local_mean + target_cell.halite_local_std * ???):
+                or
+                > if ship.halite > (ship.halite / target_cell.halite_local_sum > 1 ???)
+
+    -improve harvest logic
+        if spot.halite < threshold, go to nearby spot Why is ship returning home so early?
+        exclude spots below a threshold - more valuable to protect spots than harvest
+        calculate est. harvest time on cell as time taken to reduce spot to e.g. 50
+
+    -improve next move logic
+        - consider halite in cells incase ship ends up waiting
+
+    -build extra yard at some point
+    if step > 20 and halite > reserve + shipspawn + yardspawn and nyards < 2:
+        build yard at midpoint of most halite dense spot and yard 1
+
+    -shipbuilding
+        if nstep < 300 and totalHalite/4 > 2000
+
+    -each ship should have its own threat modifier for cells
+        -ve if ship.halite < avg. enemy
+        +ve if ship.halite > avg. enemy
+
+    -advanced pathing to avoid threat dense areas
+
+    -assault role, enabled when not worth mining
+"""
