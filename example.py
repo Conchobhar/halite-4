@@ -1,14 +1,13 @@
 import os
 from pathlib import Path
 from kaggle_environments import evaluate, make
-from agent.base import agent
 from time import time
 from utils.base import write_html
+from agent.base import agent
 from bots import v1, home2p1
 
 """SEEDS
-1984826053 - t15 ships deposits then returns to same spot
-1695788596 - t5 gridflock - can be fixed with  pathing"""
+"""
 config = {"size": 21, "startingHalite": 24000, "randomSeed": 824666594}
 env = make("halite", configuration=config, debug=True)
 trainer = env.train([None, 'bots/home2p1.py', 'random', 'random'])

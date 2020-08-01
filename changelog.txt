@@ -1,6 +1,6 @@
 """CHANGELOG
-    -fixed bug with enemy evastion
-    -fixed bug with role not moving from dep to hvst
-    -added frustration to change role back to dep
+    - frustration actually works
+    - fixed move2leastThreat
+    - evade role now is defined for conditions
 """
 

@@ -7,7 +7,11 @@ import os
 from pathlib import Path
 
 from utils.base import write_html
-from bots.v7 import agent  # CONFIG - IMPORT BOT
+try:
+    from bots import latest
+    agent = latest()
+except:
+    from bots.v8 import agent  # CONFIG - MANUALLY IMPORT BOT
 
 # CONFIG - REPLAY AND CORRESPONDING ID
 pathdl = Path('/home/xu/Downloads/')
@@ -49,7 +53,7 @@ def replay_match(path, playerid, step=0):
     # If agent carries state across turns, need to run through all steps, or can directly index into a step otherwise
     # check that we are correct player
     # print('My Id: ', board.current_player_id, board.current_player)
-    print(f'Running for: {agent.__module__}')
+    print(f'Running for:\n\t{path}\n\t{agent.__module__}')
     for step in range(400):
         state = match['steps'][step][0]  # list of length 1 for each step
         obs = state['observation']  # these are observations at this step

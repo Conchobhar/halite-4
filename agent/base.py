@@ -16,9 +16,9 @@ np.seterr(all='raise')
     """
 magic = {
     'turn_to_enable_defenders': 0,  # Use this if defending is causing issues
-    'end_game_step': 380,  # Change ship behaviour for end game
+    'end_game_step': 100,  # Change ship behaviour for end game
     'evade_ship_count': 50,  # How many ships any opponent needs to engage evasion
-    'frustration_max': 5,  # how many harvest turns waiting around/ avoiding enemies before depositing.
+    'frustration_max': 4,  # how many harvest turns waiting around/ avoiding enemies before depositing.
 }
 
 # Map move action to positional delta
@@ -83,6 +83,12 @@ role2conditions = {
         'is_not_occupied_by_enemy_yard': 3,
         'is_not_occupied_by_potential_threats': 4,
     }),
+    'evade': OrderedDict({
+        'is_not_occupied_by_threat': 0,
+        'is_not_occupied_by_self': 1,
+        'is_not_occupied_by_enemy_yard': 2,
+        'is_not_occupied_by_potential_threats': 3,
+    }),
 
 }
 
@@ -92,14 +98,17 @@ class LogEntry:
     def __init__(self):
         self.role = 'NEW'
         self.role_suspended = None
-        self.spot = None
+        self.target_cell = None   # Where ship wants to move based on role
+        self.spot = None            # assigned harvest spot
         self.spot_local = None
         self.yard = None
         self.p_action = None
         self.p_point = None
         self.set_action = None
         self.set_point = None
+        self.last_action = None
         self.frustration = 0
+        self.is_frustrated = False
         self.atk_target = None
         self.resetable_names = ['p_action', 'p_point', 'set_action', 'set_point', ]
 
@@ -251,9 +260,8 @@ class MyAgent:
         if self.yardcount == 1:
             return self.me.shipyards[0]
         else:
-            yards = [(self.dist(pos, sy.position), sy) for sy in self.me.shipyards]
-            yards = sorted(yards, key=lambda x: x[0])
-            return yards[0][1]
+            dist2yards = [(self.dist(pos, sy.position), sy) for sy in self.me.shipyards]
+            return min(dist2yards, key=lambda x: x[0])[1]
 
     def determine_best_harvest_spot_locally(self, ship):
         d = {}
@@ -304,7 +312,7 @@ class MyAgent:
             is_occupied_by_threat = False
         return is_occupied_by_threat
 
-    def get_best2worst_actions(self, ship, pt):
+    def get_best2worst_actions(self, ship, pt, weighted=True):
         ps = ship.position
         pnorm = (self.map_cyclic_coords(pt[0] - ps[0]),
                  self.map_cyclic_coords(pt[1] - ps[1]))
@@ -315,12 +323,22 @@ class MyAgent:
             ShipAction.WEST: (1 if pnorm[0] < 0 else -1),
             'WAIT': (1 if pnorm == (0, 0) else 0),
         }
-        for action in actions:  # Adjust action weight by number of potential positive collisions - max modifier of +0.8
+        if not weighted:
+            return sorted(actions, key=actions.get)[::-1]
+        if ship.log.last_action is not None and ship.log.is_frustrated:
+            # Don't wait about, and don't undo the last move. Arbitrary large decrements
+            actions['WAIT'] -= 5
+            actions[ainverse[ship.log.last_action]] -= 10
+        # Adjust action weight by:
+        #   number of potential positive collisions - modifier range 0, +1
+        #   general entity density in area - modifier between -.5, 0
+        # +ve collisions more enticing that the density they add
+        for action in actions:
             ppos = ps.translate(adelta[action], self.dim)
             action_inverse = ainverse[action]
             pcell_adjs = [self.board.cells[ppos.translate(adelta[a], self.dim)] for a in actions if a not in (action_inverse, )]
             n_pcol = len([c for c in pcell_adjs if c.ship is not None and c.ship.player_id != self.me.id and c.ship.halite > ship.halite])
-            actions[action] = actions[action] + n_pcol/5
+            actions[action] = actions[action] + n_pcol/4 - self.ship_and_yard_density[ppos]/2
         best_to_worst_actions = sorted(actions, key=actions.get)[::-1]
         maybe_yard = self.board.cells[ps].shipyard
         actions['WAIT'] = actions['WAIT'] - 1 if maybe_yard is not None else actions['WAIT']  # Penalty for waiting about on yards
@@ -337,7 +355,6 @@ class MyAgent:
 
         Ideally would rate every option based on threats vs potential to win encounter.
         """
-        # TODO maybe - prioritize based on ship threat density
         ps = ship.position
         best_to_worst_actions = self.get_best2worst_actions(ship, pt)
         chosen_action = 'UNDECIDED'
@@ -376,47 +393,35 @@ class MyAgent:
         Don't consider waiting on current pos - want to maintain minimum halite"""
         pos2threat = {}
         for pos in self.get_adjs(ship.position, r=1):
-            pos2threat[pos] = len([c for c in self.get_adjs(ship.position, r=5, return_cells=True)
-                                   if c.ship is not None and c.ship.halite <= ship.halite])
-        return sorted(pos2threat, key=pos2threat.get)[0]
+            pos2threat[pos] = sum([(c.ship is not None and c.ship.player_id != self.me.id and c.ship.halite <= ship.halite)
+                                   for c in self.get_adjs(ship.position, r=5, return_cells=True)])
+        return min(pos2threat, key=pos2threat.get)
 
     def determine_best_action(self, ship):
         if ship.log.role == 'HVST':
-            target_cell = ship.log.spot_local
+            ship.log.target_cell = ship.log.spot_local
         elif ship.log.role == 'DEP':
-            target_cell = ship.log.yard.position
+            ship.log.target_cell = ship.log.yard.position
         elif ship.log.role == 'DFND':  # Get to zero halite, move to yard if enemy adjacent
             sy = LOG.defenders2yard[ship]
             if ship.halite > 0 or len(self.get_adj_enemies(sy.position, radius=1)) > 0:  # otherwise move towards nearest enemy ship
-                target_cell = sy.position
+                ship.log.target_cell = sy.position
             else:
-                target_cell = self.get_closest_enemy_ship(ship.position).position
+                ship.log.target_cell = self.get_closest_enemy_ship(ship.position).position
         elif ship.log.role == 'call_home':
             if ship.halite > 40:
-                target_cell = ship.log.yard.position
+                ship.log.target_cell = ship.log.yard.position
             else:
-                target_cell = self.get_spot_with_least_threat(ship)
+                ship.log.target_cell = self.get_spot_with_least_threat(ship)
         elif ship.log.role == 'evade':  # Deposit to maximize own threat, else move to spot with minimal threat
             if ship.halite > 0:
-                target_cell = ship.log.yard.position
+                ship.log.target_cell = ship.log.yard.position
             else:
-                target_cell = self.get_spot_with_least_threat(ship)
+                ship.log.target_cell = self.get_spot_with_least_threat(ship)
         else:
             raise BaseException(f'Need to define logic for new role: {ship.log.role}')
-        if True or not ship.position == target_cell:  # always True - might change in future
-            ship.log.p_action = self.move_to_target(ship, target_cell)
-            best_actions = self.get_best2worst_actions(ship,target_cell)
-            best_action = best_actions[0]
-            ppos = ship.position.translate(adelta[best_action], self.dim)
-            action_inverse = ainverse[best_action]
-            ppos_adjs = [ppos.translate(adelta[a], self.dim) for a in best_actions if a not in (None, action_inverse)]
-            if ship.log.p_action != best_action and any(
-                    [self.is_pos_occupied_by_threat(ship, ppos_adj) for ppos_adj in ppos_adjs]):
-                ship.log.frustration += 1
-            elif ship.log.p_action != best_action and ship.log.p_action == 'WAIT':
-                ship.log.frustration += 1
-            else:  # reduce frustration, back to zero.
-                ship.log.frustration = max(ship.log.frustration - 1, 0)
+        if True or not ship.position == ship.log.target_cell:  # always True - might change in future
+            ship.log.p_action = self.move_to_target(ship, ship.log.target_cell)
             if ship.log.p_action != ShipAction.CONVERT:  # Will only convert if there are no safe moves.
                 ship.log.p_point = ship.position.translate(adelta[ship.log.p_action], self.dim)
             else:
@@ -456,7 +461,7 @@ class MyAgent:
         for co in cos:
             sy2dist.extend([(sy, self.dist(sy.position, ship.position)) for sy in co.shipyards])
         if len(sy2dist) > 0:
-            target = sorted(sy2dist, key=lambda x:x[1])[0][0]
+            target = min(sy2dist, key=lambda x:x[1])[0]
         else:
             target = None
         return target
@@ -476,7 +481,7 @@ class MyAgent:
         if am_in_lead and any_e_has_40_ships:
             return 'evade'
         if ship.log.role == 'HVST':
-            if ship.log.frustration > magic['frustration_max']:
+            if ship.log.is_frustrated:
                 return 'DEP'
             temp_spot = ship.log.spot
             if temp_spot is None:
@@ -525,7 +530,7 @@ class MyAgent:
                     raise BaseException('This should not occur.')
         if ship.log.role == 'call_home':
             if ship.log.atk_target is None or ship.log.atk_target.id not in LOG.enemy_targ_ids:
-                target = self.get_attack_target(ship)
+                target = self.get_attack_target(ship)  # TODO use log.target_cell
                 ship.log.atk_target = target if target is not None else Ship('-1', Point(15, 15), 500, -1, self.board)
         if ship.log.role == 'DEP':
             ship.log.spot = None  # Free up spot
@@ -547,7 +552,7 @@ class MyAgent:
                 pair_dists[pair] = self.dist(*pair)
             for ship in self.me.ships:
                 ship_mean_dist[ship] = np.mean([dist for pair, dist in pair_dists.items() if ship.position in pair])
-            return sorted(ship_mean_dist, key=ship_mean_dist.get)[0]
+            return min(ship_mean_dist, key=ship_mean_dist.get)
         else:
             sd = {}
             for s in self.me.ships:
@@ -557,7 +562,7 @@ class MyAgent:
                     s.position].halite < self.halite_global_mean * 0.75 and s.position in self.quadrant_points:
                     sd[s] = self.dist(s.position, self.me.shipyards[0].position)  # working case assuming only 1 SY
             if len(sd) > 0:
-                return sorted(sd, key=sd.get)[::-1][0]
+                return max(sd, key=sd.get)
             else:
                 return None
             # ph = {}
@@ -604,10 +609,11 @@ class MyAgent:
                 and c.ship.halite < halite_min]
 
     def get_closest_enemy_ship(self, pos):
-        ships_by_dist = sorted(
+        # TODO - what if this is None
+        ships_by_dist = min(
             [(ship, self.dist(pos, ship.position)) for plr in self.board.players.values()
              if plr is not self.me for ship in plr.ships], key=lambda x:x[1])
-        return ships_by_dist[0][0]
+        return ships_by_dist[0]
 
     def start_of_turn_yard_defending(self, radius=1):
         for sy in self.me.shipyards:
@@ -618,9 +624,8 @@ class MyAgent:
                                              for s in self.me.ships
                                              if self.dist(s.position, sy.position) <= radius
                                              and s.log.role != 'DFND']
-                nearby_candidates_by_dist = sorted(nearby_candidates_by_dist, key=lambda x: x[1])
                 if len(nearby_candidates_by_dist) > 0:
-                    ship = nearby_candidates_by_dist[0][0]
+                    ship = min(nearby_candidates_by_dist, key=lambda x: x[1])
                     print(f'\tNearby candidate: {ship.id} at P{ship.position}\n')
                     LOG.yard2defenders[sy] = ship
                     ship.log.role_suspended = ship.log.role if ship.log.role != 'NEW' else 'HVST'
@@ -640,10 +645,14 @@ class MyAgent:
         for pid, p in self.board.players.items():
             self.p2net_halite[p] = p.halite + sum([s.halite for s in self.board.ships.values()])
         # g = np.ndarray([self.dim, self.dim])
+        self.ship_and_yard_density = {}
         self.halite_density = {}
         cells = self.board.cells
         for p, cell in cells.items():
-            # g[p] = cell.halite
+            # Need large radius for collisionables to effectively nudge movement
+            collisionable_count = [(cells[ap].ship is not None or cells[ap].shipyard is not None)
+                              for ap in self.get_adjs(p, r=4)]
+            self.ship_and_yard_density[p] = sum(collisionable_count)/len(collisionable_count)
             self.halite_density[p] = np.mean([cells[ap].halite for ap in self.get_adjs(p, r=2)] + [cell.halite])
             halites = [cells[ap].halite for ap in self.get_adjs(p, r=2) if cells[ap].halite != 0] + [cell.halite]
             halites = halites if len(halites) > 0 else [0]
@@ -680,6 +689,25 @@ class MyAgent:
         self.enemy_ship_points = [ship.position for plr in self.board.players.values()
                                   if plr is not self.me for ship in plr.ships]
 
+    def eval_frustration(self, ship):
+        if ship.log.target_cell is not None:  # Else its converting or possibly some other cases.
+            best_actions = self.get_best2worst_actions(ship, ship.log.target_cell, weighted=False)
+            best_action = best_actions[0]
+            ppos = ship.position.translate(adelta[best_action], self.dim)
+            action_inverse = ainverse[best_action]
+            ppos_adjs = [ppos.translate(adelta[a], self.dim) for a in best_actions if a not in (None, action_inverse)]
+            if ship.log.set_action != best_action and any(
+                    [self.is_pos_occupied_by_threat(ship, ppos_adj) for ppos_adj in ppos_adjs]):
+                ship.log.frustration += 1
+            elif ship.log.set_action != best_action and ship.log.set_action == 'WAIT':
+                ship.log.frustration += 1
+            else:  # reduce frustration, back to zero.
+                ship.log.frustration = max(ship.log.frustration - 1, 0)
+            # If ship is not waiting about and is on a shipyard, reset frustration
+            if ship.log.set_action != 'WAIT':
+                ship.log.frustration = 0 if self.board.cells[ship.position].shipyard is not None else ship.log.frustration
+            ship.log.is_frustrated = ship.log.frustration >= magic['frustration_max']
+
     """                     GET ACTIONS                 """
     def get_actions(self, obs, config):
         """Main loop"""
@@ -714,8 +742,13 @@ class MyAgent:
                     action, point = ship.log.p_action, ship.log.p_point
                     ship.next_action = action if action != 'WAIT' else None
                     ship.log.set_action, ship.log.set_point = action, point
-                    # When ship action is calculated above, any set points should now not be possibilities.
-                else:  # Give spot to highest priority ship (first DFNDr, ship found on a yard, else ship with highest halite)
+                    # When ship action is calculated above,
+                    # any set points should now NOT be possibilities.
+                else:
+                    # Give spot to highest priority ship
+                    #        first DFNDr,
+                    #        ship found on a yard,
+                    #        else ship with highest halite)
                     dfnd_ships = [(s, s.halite) for s in ships if s.log.role == 'DFND']
                     sy_ships = [(s, s.halite) for s in ships if s.position in [sy.position for sy in me.shipyards]]
                     ships_by_halite = sorted([(s, s.halite) for s in ships], key=lambda x: -x[1])
@@ -728,7 +761,7 @@ class MyAgent:
         # Ship building
         h2ns = [(p.halite + sum([s.halite for s in self.board.ships.values() if s.player_id == me.id])
                  , len(p.ships)) for p in self.board.players.values() if p.id is not me.id]
-        nships_other = sorted(h2ns, key=lambda x: -x[0])[0][1]
+        nships_other = max(h2ns, key=lambda x: x[0])[1]
         should_still_spawn = ((len(me.ships) <= nships_other + 2) or (obs.step < 30)
                               if (obs.step < magic['end_game_step']) else len(me.ships) < 5)
         reserve = config.convertCost if obs.step > 20 else 0
@@ -743,6 +776,9 @@ class MyAgent:
                 shipyard.next_action = ShipyardAction.SPAWN
                 spawncount += 1
         self.board_prev = self.board
+        for ship in me.ships:
+            self.eval_frustration(ship)
+            ship.log.last_action = ship.log.set_action
         return me.next_actions
 
 
