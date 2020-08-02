@@ -1,6 +1,7 @@
 """CHANGELOG
-    - frustration actually works
-    - fixed move2leastThreat
-    - evade role now is defined for conditions
+    - fixed getspotwithleastthreat
+    - second shipyard spawns much sooner
+    - ships spawned if anyone has more ships, or im maintaining a lead
+    - using mean and std as per v10
 """
 

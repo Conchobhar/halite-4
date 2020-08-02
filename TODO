@@ -1,5 +1,20 @@
 """NEXT
+    - best_ship_for_convert function of halite density
+    - call_home and attack targets
+        - turn 399, convert if it gains any halite
+
     -live
+        - reevalute step needs to consider enemy density
+        -fix evasion
+        - match nships of any player rather than one with most hlite
+            -maintain ships (my halite - their halite) / costOfShip
+        - need to deposit more frequently
+            - change frust limit to 4
+            - gbl overharesting to 2*sigma?
+
+
+        - attack if harvesting not worth it
+            - attack yards insde r=5 of yards
         - choose local harvest spot better
         - choose global harvbets spot better
     cal global self ship density and enemy ship density
@@ -19,6 +34,7 @@
         -send to zones rather than spots
         -once at zone, pick best spot
         -optimize spot on each turn - if ship moves to avoid collision, drop sopt
+        -leastHaliteShips chase opponents
     -issues
 
 

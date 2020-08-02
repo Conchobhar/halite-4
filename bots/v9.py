@@ -22,7 +22,7 @@ np.seterr(all='raise')
     """
 magic = {
     'turn_to_enable_defenders': 0,  # Use this if defending is causing issues
-    'end_game_step': 100,  # Change ship behaviour for end game
+    'end_game_step': 360,  # Change ship behaviour for end game
     'evade_ship_count': 50,  # How many ships any opponent needs to engage evasion
     'frustration_max': 4,  # how many harvest turns waiting around/ avoiding enemies before depositing.
 }
@@ -631,7 +631,7 @@ class MyAgent:
                                              if self.dist(s.position, sy.position) <= radius
                                              and s.log.role != 'DFND']
                 if len(nearby_candidates_by_dist) > 0:
-                    ship = min(nearby_candidates_by_dist, key=lambda x: x[1])
+                    ship = min(nearby_candidates_by_dist, key=lambda x: x[1])[0]
                     print(f'\tNearby candidate: {ship.id} at P{ship.position}\n')
                     LOG.yard2defenders[sy] = ship
                     ship.log.role_suspended = ship.log.role if ship.log.role != 'NEW' else 'HVST'

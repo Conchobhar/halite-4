@@ -16,7 +16,7 @@ np.seterr(all='raise')
     """
 magic = {
     'turn_to_enable_defenders': 0,  # Use this if defending is causing issues
-    'end_game_step': 100,  # Change ship behaviour for end game
+    'end_game_step': 360,  # Change ship behaviour for end game
     'evade_ship_count': 50,  # How many ships any opponent needs to engage evasion
     'frustration_max': 4,  # how many harvest turns waiting around/ avoiding enemies before depositing.
 }
@@ -100,7 +100,6 @@ class LogEntry:
         self.role_suspended = None
         self.target_cell = None   # Where ship wants to move based on role
         self.spot = None            # assigned harvest spot
-        self.spot_local = None
         self.yard = None
         self.p_action = None
         self.p_point = None
@@ -193,6 +192,8 @@ class MyAgent:
         self.halite_global_std = None
         self.halite_density = None
         self.global_min_requirement_to_harvest = None
+        self.spawncount = None
+        self.convertcount = None
         self.yardcount = None
         self.prospective_yard = None
         self.action_iter = None
@@ -394,39 +395,32 @@ class MyAgent:
         pos2threat = {}
         for pos in self.get_adjs(ship.position, r=1):
             pos2threat[pos] = sum([(c.ship is not None and c.ship.player_id != self.me.id and c.ship.halite <= ship.halite)
-                                   for c in self.get_adjs(ship.position, r=5, return_cells=True)])
+                                   for c in self.get_adjs(pos, r=5, return_cells=True)])
         return min(pos2threat, key=pos2threat.get)
 
-    def determine_best_action(self, ship):
+    def determine_target_cell(self, ship):
         if ship.log.role == 'HVST':
-            ship.log.target_cell = ship.log.spot_local
+            return ship.log.spot
         elif ship.log.role == 'DEP':
-            ship.log.target_cell = ship.log.yard.position
+            return ship.log.yard.position
         elif ship.log.role == 'DFND':  # Get to zero halite, move to yard if enemy adjacent
             sy = LOG.defenders2yard[ship]
             if ship.halite > 0 or len(self.get_adj_enemies(sy.position, radius=1)) > 0:  # otherwise move towards nearest enemy ship
-                ship.log.target_cell = sy.position
+                return sy.position
             else:
-                ship.log.target_cell = self.get_closest_enemy_ship(ship.position).position
+                return self.get_closest_enemy_ship(ship.position).position
         elif ship.log.role == 'call_home':
             if ship.halite > 40:
-                ship.log.target_cell = ship.log.yard.position
+                return ship.log.yard.position
             else:
-                ship.log.target_cell = self.get_spot_with_least_threat(ship)
+                return self.get_spot_with_least_threat(ship)
         elif ship.log.role == 'evade':  # Deposit to maximize own threat, else move to spot with minimal threat
             if ship.halite > 0:
-                ship.log.target_cell = ship.log.yard.position
+                return ship.log.yard.position
             else:
-                ship.log.target_cell = self.get_spot_with_least_threat(ship)
+                return self.get_spot_with_least_threat(ship)
         else:
             raise BaseException(f'Need to define logic for new role: {ship.log.role}')
-        if True or not ship.position == ship.log.target_cell:  # always True - might change in future
-            ship.log.p_action = self.move_to_target(ship, ship.log.target_cell)
-            if ship.log.p_action != ShipAction.CONVERT:  # Will only convert if there are no safe moves.
-                ship.log.p_point = ship.position.translate(adelta[ship.log.p_action], self.dim)
-            else:
-                ship.log.set_action = ShipAction.CONVERT
-                ship.next_action = ShipAction.CONVERT
 
     def is_overharvested_locally(self, ship, spot):
         # **n harvests under local mean? OR if nearby threat on spot? try somewhere else
@@ -443,7 +437,7 @@ class MyAgent:
         #   OR x4 local mean.
         cond = (target_cell.halite_local_mean < self.global_min_requirement_to_harvest
                 or
-                ship.halite > (target_cell.halite_local_mean * 4))
+                ship.halite > (target_cell.halite_local_mean + target_cell.halite_local_std * 2))
         # TODO target_cell.halite_local_mean + target_cell.halite_local_std * 4
         return cond
 
@@ -511,30 +505,26 @@ class MyAgent:
                 return ship.log.role_suspended
         return ship.log.role
 
-    def determine_ship_action(self, ship):
-        """Harvest/Deposit cycle"""
-        ship.log.yard = self.get_nearest_shipyard(ship.position)
-        ship.log.role = self.assign_role(ship)
-        if ship.log.role == 'HVST':
-            if ship.log.spot is None:
-                ship.log.spot = self.determine_best_harvest_spot_from_yard(ship)
-                ship.log.spot_local = ship.log.spot
-            target_cell = self.board.cells[ship.log.spot]
-            # **n harvests under local mean? try somewhere else OR if nearby threat on spot
-            if self.is_overharvested_locally(ship, ship.log.spot):
-                """less than local stat? go somewhere else local"""
-                ship.log.spot = self.determine_best_harvest_spot_locally(ship)
-                if ship.log.spot is not None:
-                    ship.log.spot_local = ship.log.spot
-                else:
-                    raise BaseException('This should not occur.')
+    def dev_attack_role(self, ship):
+        """TODO ..."""
         if ship.log.role == 'call_home':
             if ship.log.atk_target is None or ship.log.atk_target.id not in LOG.enemy_targ_ids:
                 target = self.get_attack_target(ship)  # TODO use log.target_cell
                 ship.log.atk_target = target if target is not None else Ship('-1', Point(15, 15), 500, -1, self.board)
+
+    def evaluate_ship_harvest_spot(self,ship):
+        if ship.log.role == 'HVST':
+            if ship.log.spot is None:
+                return self.determine_best_harvest_spot_from_yard(ship)
+            # **n harvests under local mean? try somewhere else OR if nearby threat on spot
+            if self.is_overharvested_locally(ship, ship.log.spot):
+                """less than local stat? go somewhere else local"""
+                return self.determine_best_harvest_spot_locally(ship)
+            else:
+                return ship.log.spot
         if ship.log.role == 'DEP':
-            ship.log.spot = None  # Free up spot
-        self.determine_best_action(ship)
+            return None  # Free up spot
+        return None
 
     def get_best_ship_for_yard(self):
         """If building a yard after losing the only one:
@@ -587,20 +577,16 @@ class MyAgent:
 
     def start_of_turn_yard_spawning(self):
         # If no yards, create and mark point
-        if len(self.me.shipyards) == 0:
-            ship = self.get_best_ship_for_yard()
-            ship.next_action = ShipAction.CONVERT
-            ship.log.set_action = ShipAction.CONVERT
-            # conversion is resolved before collision - we don't need to reserve point with log.set_point
-            ship.log.p_point = None
-            self.prospective_yard = Shipyard('PROSPECTIVE', ship.position, self.me.id, self.board)
-        # Quick try for second SY logic
-        if self.board.step > 20 and self.board.step < magic['end_game_step'] and self.me.halite > 2000 and len(self.me.ships) > 10 and len(self.me.shipyards) == 1:
+        second_yard_cond = self.board.step >= 10 and self.board.step < magic['end_game_step'] and self.me.halite >= 500 and len(self.me.ships) > 7 and len(self.me.shipyards) == 1
+        if len(self.me.shipyards) == 0 or second_yard_cond:
             ship = self.get_best_ship_for_yard()
             if ship is not None:
                 ship.next_action = ShipAction.CONVERT
                 ship.log.set_action = ShipAction.CONVERT
+                # conversion is resolved before collision - we don't need to reserve point with log.set_point
                 ship.log.p_point = None
+                self.prospective_yard = Shipyard('PROSPECTIVE', ship.position, self.me.id, self.board)
+                self.convertcount += 1
 
     def get_adj_enemies(self, pos, radius=2, halite_min=9999):
         cells_adj = [self.board.cells[adj] for adj in self.get_adjs(pos, r=radius)]
@@ -714,14 +700,22 @@ class MyAgent:
         self.board = Board(obs, config)
         self.me = self.board.current_player
         me = self.me  # just for shorthand
-        spawncount, self.yardcount = 0, len(self.me.shipyards)
+        self.spawncount, self.convertcount, self.yardcount = 0, 0, len(self.me.shipyards)
         self.refresh_ship_log()
         self.setup_stats()
         self.start_of_turn_yard_spawning()
         if obs.step > magic['turn_to_enable_defenders']:
             self.start_of_turn_yard_defending()
-        # Main ship loop - iterate until each ship has an action
         self.action_iter = 0
+
+        # Initial evaluation loop
+        for ship in [s for s in me.ships if s.log.set_action is None]:
+            ship.log.yard = self.get_nearest_shipyard(ship.position)
+            ship.log.role = self.assign_role(ship)
+            ship.log.spot = self.evaluate_ship_harvest_spot(ship)
+            ship.log.target_cell = self.determine_target_cell(ship)
+
+        # Main ship loop - iterate until each ship has an action
         while len(LOG.set_actions) != len(me.ships):
             self.action_iter += 1
             if self.action_iter > 24:
@@ -731,12 +725,22 @@ class MyAgent:
 
             # Calculate best potential actions
             for ship in [s for s in me.ships if s.log.set_action is None]:
-                self.determine_ship_action(ship)
+                ship.log.p_action = self.move_to_target(ship, ship.log.target_cell)
+                if ship.log.p_action != ShipAction.CONVERT:  # Will only convert if there are no safe moves.
+                    ship.log.p_point = ship.position.translate(adelta[ship.log.p_action], self.dim)
+                else:
+                    ship.log.set_action = ShipAction.CONVERT
+                    ship.next_action = ShipAction.CONVERT
+                    self.convertcount += 1
 
             # Confirm non-conflicting actions. Record set actions in ship log to keep track of
-            # how many ships actions are finalized.
-            p2s = LOG.p_point2ship  # point2ship map - excluding set ships
-            for point, ships in p2s.items():
+            # how many ships actions are finalized. Resolve actions outwards from shipyards.
+            # I expect this will descrease the chance of a ship being locked into a collision.
+            p2ships = LOG.p_point2ship  # point2ship map - excluding set ships
+            p2nearestyard = {p:self.dist(p, self.get_nearest_shipyard(p).position) for p, s in p2ships.items()}
+            points = sorted(p2nearestyard, key=p2nearestyard.get)
+            for point in points:
+                ships = p2ships[point]
                 if len(ships) == 1:  # Only contender - give action
                     ship = ships[0]
                     action, point = ship.log.p_action, ship.log.p_point
@@ -758,23 +762,31 @@ class MyAgent:
                     priority_ship.next_action = action if action != 'WAIT' else None
                     priority_ship.log.set_action, priority_ship.log.set_point = action, point
 
-        # Ship building
-        h2ns = [(p.halite + sum([s.halite for s in self.board.ships.values() if s.player_id == me.id])
-                 , len(p.ships)) for p in self.board.players.values() if p.id is not me.id]
-        nships_other = max(h2ns, key=lambda x: x[0])[1]
-        should_still_spawn = ((len(me.ships) <= nships_other + 2) or (obs.step < 30)
+        # SHIP BUILDING
+        # Match other players max ship count
+        p2ns = [(p.id, len(p.ships)) for p in self.board.players.values()]
+        max_other_halite = max(p.halite for p in self.board.players.values() if p.id is not me.id)
+        # Spawn in early game, or maintain 5 in endgame
+        max_p2ns = max(p2ns, key=lambda x: x[1])
+        max_ns_other = max([(pid,ns) for pid, ns in p2ns if pid != me.id], key=lambda x: x[1])[1]
+        max_nships_everyone = max_p2ns[1]
+        delta_halite = me.halite - max_other_halite
+        delta_ships = len(me.ships) - max_ns_other
+        # If ahead on stored, and not more than 5 ships above next highest, spawn another
+        am_maintaining_lead = max_p2ns[0] == me.id and delta_halite >= 1000 and delta_ships < 5
+        should_still_spawn = am_maintaining_lead or ((len(me.ships) < max_nships_everyone) or (obs.step < 30)
                               if (obs.step < magic['end_game_step']) else len(me.ships) < 5)
         reserve = config.convertCost if obs.step > 20 else 0
         halite_left_per_ship = sum(c.halite for c in self.board.cells.values()) / (
-                    1 + len(self.board.ships))  # +1 to avoid zero div
+                1 + len(self.board.ships))  # +1 to avoid zero div
         for shipyard in me.shipyards:
             # If we can afford spawn, considering cumulation of other SY spawns and keeping a reserve for one yard.
-            have_enough_halite = (me.halite - spawncount * config.spawnCost - reserve) >= config.spawnCost
+            have_enough_halite = (me.halite - self.spawncount * config.spawnCost - self.convertcount * config.convertCost - reserve) >= config.spawnCost
             no_ship_reserved_point = shipyard.position not in LOG.set_points
-            worth_spawning = True #  halite_left_per_ship > 350  TODO do I need this?
+            worth_spawning = True  # halite_left_per_ship > 350  TODO do I need this?
             if have_enough_halite and worth_spawning and should_still_spawn and no_ship_reserved_point:
                 shipyard.next_action = ShipyardAction.SPAWN
-                spawncount += 1
+                self.spawncount += 1
         self.board_prev = self.board
         for ship in me.ships:
             self.eval_frustration(ship)

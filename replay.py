@@ -11,7 +11,7 @@ try:
     from bots import latest
     agent = latest()
 except:
-    from bots.v8 import agent  # CONFIG - MANUALLY IMPORT BOT
+    from bots.v9 import agent  # CONFIG - MANUALLY IMPORT BOT
 
 # CONFIG - REPLAY AND CORRESPONDING ID
 pathdl = Path('/home/xu/Downloads/')

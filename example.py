@@ -4,13 +4,13 @@ from kaggle_environments import evaluate, make
 from time import time
 from utils.base import write_html
 from agent.base import agent
-from bots import v8, home2p1
+from bots import v10, v9, home2p1
 
 """SEEDS
 """
 config = {"size": 21, "startingHalite": 24000, "randomSeed": 824666594}
 env = make("halite", configuration=config, debug=True)
-trainer = env.train([None, 'bots/home2p1.py', 'random', 'random'])
+trainer = env.train([None, 'random', 'random', 'random'])
 # config = {"size": 21, "startingHalite": 24000, "randomSeed": 824666594}
 # env = make("halite", configuration=config, debug=True)
 # trainer = env.train([None, 'random',])
