@@ -1,3 +1,13 @@
+"""CHANGELOG
+    - fixed getspotwithleastthreat
+    - second shipyard spawns much sooner
+    - ships spawned if anyone has more ships, or im maintaining a lead
+    - using mean and std as per v10
+
+    b
+        determine_best_harvest_spot_locally dependant on threat and dist from yard
+"""
+
 from kaggle_environments.envs.halite.helpers import Board, ShipAction, ShipyardAction, Ship, Shipyard, Point
 from collections import OrderedDict
 from functools import lru_cache
@@ -44,22 +54,6 @@ pid2quadrant = {
     2: Point(5, 5),
     3: Point(15, 5)
 }
-
-# Nonadjacent player id
-pid2nonadj = {
-    0: 3,
-    1: 2,
-    2: 1,
-    3: 0,
-}
-# Adjacent player id
-pid2adj = {
-    0: (1,3),
-    1: (0,3),
-    2: (0,3),
-    3: (2,1),
-}
-
 
 """Role descriptions
 *Defender
@@ -132,9 +126,6 @@ class LogEntry:
         for name in self.resetable_names:
             setattr(self, name, None)
 
-    def __str__(self):
-        return f"R:{self.role} S:{self.spot} p_a:{self.p_action} p_p:{self.p_point}"
-
 
 class Log(dict):
     """Keys are ships. Values are a LogEntry()"""
@@ -198,8 +189,6 @@ class MyAgent:
         self.board_prev = None
         self.config = self.board.configuration
         self.me = self.board.current_player
-        self.pids_adj = pid2adj[self.me.id]
-        self.pid_nonadj = pid2nonadj[self.me.id]
         self.dim = config.size
         self.mid = config.size // 2
         self.quadrant_position = pid2quadrant[self.me.id]
@@ -211,7 +200,7 @@ class MyAgent:
         self.halite_global_mean = None
         self.halite_global_median = None
         self.halite_global_std = None
-        self.halite_density = {}
+        self.halite_density = None
         self.global_min_requirement_to_harvest = None
         self.spawncount = None
         self.convertcount = None
@@ -287,14 +276,8 @@ class MyAgent:
 
     def determine_best_harvest_spot_locally(self, ship):
         d = {}
-        for pos in self.get_adjs(ship.position, r=4):
-            cell = self.board.cells[pos]
-            if cell.shipyard is None:
-                threat_array = [(c.ship is not None and c.ship.player_id != self.me.id and c.ship.halite <= ship.halite)
-                                for c in self.get_adjs(ship.position, r=1, return_cells=True)]
-                threat_factor = 1 - sum(threat_array)/len(threat_array)
-                dist = self.dist(ship.log.yard.position, pos)
-                d[pos] = (self.board.cells[pos].halite / dist) * threat_factor
+        for pos in self.get_adjs(ship.position, r=2):
+            d[pos] = self.board.cells[pos].halite
         d = sorted(d, key=d.get)[::-1]
         for pos in d:
             if pos not in LOG.spots and not self.is_pos_occupied_by_threat(ship, pos):
@@ -465,8 +448,7 @@ class MyAgent:
         cond = (target_cell.halite_local_mean < self.global_min_requirement_to_harvest
                 or
                 ship.halite > (target_cell.halite_local_mean + target_cell.halite_local_std * 2))
-        # If ship carrying 2std than mean carrying, go home
-        # gohome = ship.halite > self.padj_cargo_adj_mean + 2 * self.padj_cargo_adj_std
+        # TODO target_cell.halite_local_mean + target_cell.halite_local_std * 4
         return cond
 
     def get_closest_opponents_by_score(self):
@@ -559,7 +541,8 @@ class MyAgent:
             Return ship with minimum mean distance to others.
                 Calculate distance between each point pair.
                 Calculate mean of distance for each ships pairings.
-        else if this will be 2nd yard:"""
+        else if this will be 2nd yard:
+            # TODO - simple logic. need to perhaps consider halite density and send a ship to a pos to build it"""
         pair_dists = {}
         if len(self.me.ships) == 1:
             return self.me.ships[0]
@@ -569,23 +552,15 @@ class MyAgent:
                 pair_dists[pair] = self.dist(*pair)
             for ship in self.me.ships:
                 ship_mean_dist[ship] = np.mean([dist for pair, dist in pair_dists.items() if ship.position in pair])
-            if self.me.halite >= 500:
-                return min(ship_mean_dist, key=ship_mean_dist.get)
-            else:  # No yard and no reserve - need a ship with req. convert halite
-                ship_mean_dist_w_500 = {s:d for s,d in ship_mean_dist.items() if s.halite >= self.config.convert_cost}
-                return min(ship_mean_dist_w_500, key=ship_mean_dist.get)
+            return min(ship_mean_dist, key=ship_mean_dist.get)
         else:
             sd = {}
             for s in self.me.ships:
-                sy = self.get_nearest_shipyard(s.position)
-                dist = self.dist(s.position, sy.position)
+                dist = self.dist(s.position, self.me.shipyards[0].position)
                 # hard cody mc hardcodeface
-                is_spot_low_halite = self.board.cells[s.position].halite < self.halite_global_mean * 0.75
-                if 3 < dist < 12 \
-                        and is_spot_low_halite \
-                        and s.position in self.quadrant_points:
-                    # For ships within dist bounds, use ship near max density
-                    sd[s] = self.halite_density[s.position]
+                if dist > 3 and dist < 10 and self.board.cells[
+                    s.position].halite < self.halite_global_mean * 0.75 and s.position in self.quadrant_points:
+                    sd[s] = self.dist(s.position, self.me.shipyards[0].position)  # working case assuming only 1 SY
             if len(sd) > 0:
                 return max(sd, key=sd.get)
             else:
@@ -612,9 +587,8 @@ class MyAgent:
 
     def start_of_turn_yard_spawning(self):
         # If no yards, create and mark point
-        yard_cond_second = self.board.step >= 10 and self.board.step < magic['end_game_step'] and self.me.halite >= 500 and len(self.me.ships) > 7 and len(self.me.shipyards) == 1
-        yard_cond_third = self.board.step >= 30 and self.board.step < magic['end_game_step'] and self.me.halite >= 500 and len(self.me.ships) > 7 and len(self.me.shipyards) == 2
-        if len(self.me.shipyards) == 0 or yard_cond_second or yard_cond_third:
+        second_yard_cond = self.board.step >= 10 and self.board.step < magic['end_game_step'] and self.me.halite >= 500 and len(self.me.ships) > 7 and len(self.me.shipyards) == 1
+        if len(self.me.shipyards) == 0 or second_yard_cond:
             ship = self.get_best_ship_for_yard()
             if ship is not None:
                 ship.next_action = ShipAction.CONVERT
@@ -657,39 +631,27 @@ class MyAgent:
         """Computables at start of each step. Lazily calculating adjacent positions for each position."""
         # TODO - distinguish between sy ids and s ids
         LOG.enemy_targ_ids = [s.id for s in self.board.ships.values() if s.player_id != self.me.id] + [sy.id for sy in self.board.shipyards.values() if sy.player_id != self.me.id]
-        # Map halite
+
         self.halite_global_mean = int(np.mean([cell.halite for cell in self.board.cells.values() if cell.halite != 0]))
         self.halite_global_median = int(
             np.median([cell.halite for cell in self.board.cells.values() if cell.halite != 0]))
         self.halite_global_std = int(np.std([cell.halite for cell in self.board.cells.values() if cell.halite != 0]))
-        cells = self.board.cells
-        for p, cell in cells.items():
-            halites = [(cells[ap].halite / self.dist(p, ap)) for ap in self.get_adjs(p, r=5)] + [cell.halite]
-            self.halite_density[p] = np.mean(halites)
         self.global_min_requirement_to_harvest = self.halite_global_mean - self.halite_global_std
-        # Cargo halite
-        adjop_cargos = [s.halite for s in self.board.ships.values() if s.player_id in self.pids_adj]
-        adjop_cargos = [0,] if len(adjop_cargos) == 0 else adjop_cargos
-        me_cargos = [s.halite for s in self.me.ships]
-        me_cargos = [0, ] if len(me_cargos) == 0 else me_cargos
-        self.padj_cargo_adj_mean = np.mean(adjop_cargos)
-        self.padj_cargo_adj_std = np.std(adjop_cargos)
-        self.me_cargo_mean = np.mean(me_cargos)
-        self.me_cargo_std = np.std(me_cargos)
+
         for pid, p in self.board.players.items():
             self.p2net_halite[p] = p.halite + sum([s.halite for s in self.board.ships.values()])
         # g = np.ndarray([self.dim, self.dim])
         self.ship_and_yard_density = {}
+        self.halite_density = {}
         cells = self.board.cells
         for p, cell in cells.items():
             # Need large radius for collisionables to effectively nudge movement
             collisionable_count = [(cells[ap].ship is not None or cells[ap].shipyard is not None)
-                                   for ap in self.get_adjs(p, r=4)]
+                              for ap in self.get_adjs(p, r=4)]
             self.ship_and_yard_density[p] = sum(collisionable_count)/len(collisionable_count)
-            self.halite_density[p] = np.mean([cells[ap].halite for ap in self.get_adjs(p, r=4)] + [cell.halite])
-            halites = [cells[ap].halite for ap in self.get_adjs(p, r=4) if cells[ap].halite != 0] + [cell.halite]
+            self.halite_density[p] = np.mean([cells[ap].halite for ap in self.get_adjs(p, r=2)] + [cell.halite])
+            halites = [cells[ap].halite for ap in self.get_adjs(p, r=2) if cells[ap].halite != 0] + [cell.halite]
             halites = halites if len(halites) > 0 else [0]
-            # Local stats do not include 0 halite cells
             cell.halite_local_mean = np.mean(halites)
             cell.halite_local_std = np.std(halites)
 
@@ -712,6 +674,9 @@ class MyAgent:
                 else:
                     halite_potential = -1
                 d[pos] = halite_potential
+            # get spots around enemy yards to ignore
+            enemy_yards_pos = [yard.position for yard in self.board.shipyards.values()
+                               if yard.player_id != self.me.id]
             self.harvest_spot_values = sorted(d.items(), key=lambda x: -x[1])
 
         # Calculate per turn constants

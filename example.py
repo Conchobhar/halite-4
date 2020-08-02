@@ -20,7 +20,8 @@ def play():
     obs = trainer.reset()
     while not env.done:
         my_actions = agent(obs, env.configuration)
-        print(f"Step+1: {obs['step']+1}, n actions {len(my_actions)}")
+        icon = ['-_-', '_-_'][(obs.step+1) % 2]
+        print(f'{icon} step+1: {obs.step +1} n actions: {len(my_actions)}', end="\r", flush=True)
         obs, reward, done, info = trainer.step(my_actions)
         t = env.render(mode='html', return_obj=True, width=800, height=800, header=False, controls=True)
         write_html(t, 'render.html')

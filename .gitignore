@@ -1,3 +1,6 @@
 h3/
 html/
 submission.py
+.idea/
+replays/
+__pycache__/

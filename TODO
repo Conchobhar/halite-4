@@ -1,22 +1,26 @@
 """NEXT
-    - best_ship_for_convert function of halite density
+    -ship yards prioritize spawn location
     - call_home and attack targets
         - turn 399, convert if it gains any halite
 
     -live
-        - reevalute step needs to consider enemy density
-        -fix evasion
-        - match nships of any player rather than one with most hlite
-            -maintain ships (my halite - their halite) / costOfShip
+        - 3rd yard
+            - cluster on density map
         - need to deposit more frequently
-            - change frust limit to 4
+            - change frust limit to 4, maintain 3rd yard?
+                -proritize spawn yard by
             - gbl overharesting to 2*sigma?
 
 
-        - attack if harvesting not worth it
-            - attack yards insde r=5 of yards
-        - choose local harvest spot better
-        - choose global harvbets spot better
+    - ATTACK if harvesting not worth it
+        - attack yards insde r=5 of yards
+
+    -ZONES
+        -send to zones rather than spots
+        -once at zone, pick best spot
+        -optimize spot on each turn - if ship moves to avoid collision, drop sopt
+        -leastHaliteShips chase opponents
+
     cal global self ship density and enemy ship density
     normalize threat - median ship halite is zero point
     each spot weighted by ((myships + 1)/(myships + 1 + eships)
@@ -24,35 +28,9 @@
         if no ships weight is one
         only enemy, weight is zero
 
-        -choose requirements better for overharvesting
-        -
-
-
-        ships spread to sparsely - should weight spots by n enemy ship density
-
-    -ZONES
-        -send to zones rather than spots
-        -once at zone, pick best spot
-        -optimize spot on each turn - if ship moves to avoid collision, drop sopt
-        -leastHaliteShips chase opponents
-    -issues
-
-
     - Changes to validate in isolation
     Go home logic
-                < if ship.halite > (target_cell.halite_local_mean * 4):
                 > if ship.halite > (target_cell.halite_local_mean + target_cell.halite_local_std * ???):
-                or
-                > if ship.halite > (ship.halite / target_cell.halite_local_sum > 1 ???)
-
-    -improve harvest logic
-        if spot.halite < threshold, go to nearby spot Why is ship returning home so early?
-        exclude spots below a threshold - more valuable to protect spots than harvest
-        calculate est. harvest time on cell as time taken to reduce spot to e.g. 50
-
-    -Maintain extra yards
-        - if halite > 2k
-
 
     -each ship should have its own threat modifier for cells
         -ve if ship.halite < avg. enemy

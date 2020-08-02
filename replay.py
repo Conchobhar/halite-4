@@ -1,26 +1,25 @@
 # From https://www.kaggle.com/solverworld/replay-your-agent-on-a-specific-step
+import json,sys, time
+from pathlib import Path
+
 from kaggle_environments import make
 from kaggle_environments.envs.halite.helpers import *
 from kaggle_environments.utils import structify
-import json
-import os
-from pathlib import Path
 
 from utils.base import write_html
+
 try:
     from bots import latest
     agent = latest()
 except:
     from bots.v11 import agent  # CONFIG - MANUALLY IMPORT BOT
+myid = 1
 
 # CONFIG - REPLAY AND CORRESPONDING ID
 pathdl = Path('/home/xu/Downloads/')
 # path_replay = pathdl / '1984103.json'
 paths = pathdl.glob('*.json')
 path_replay = max(paths, key=lambda p:p.stat().st_ctime)
-myid = 3
-
-
 
 
 '''
@@ -60,10 +59,12 @@ def replay_match(path, playerid, step=0):
         obs['player'] = playerid  # change the player to the one we want to inspect
         board = Board(obs, config)
         obs = structify(obs)  # turn the dict's into structures with attributes
-        # This is our agent recreating what happened on this step
-        # ret=sub.agent(obs, config)
+        icon = '+x'[(obs.step+1) % 2]
+        print(f'{icon} step+1: {obs.step +1}', end="\r", flush=True)
+        # sys.stdout.write(f'step+1: {obs.step +1}')
+        # sys.stdout.flush()
+        # restart_line()
         ret = agent(obs, config)
-        print(f'step: {obs.step}')
 
 
 replay_match(path_replay, myid)

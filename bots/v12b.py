@@ -1,3 +1,8 @@
+"""CHANGELOG
+    - convert near high density spots
+    - maintain 3 yards
+"""
+
 from kaggle_environments.envs.halite.helpers import Board, ShipAction, ShipyardAction, Ship, Shipyard, Point
 from collections import OrderedDict
 from functools import lru_cache

@@ -1,10 +1,5 @@
 """CHANGELOG
-    - fixed getspotwithleastthreat
-    - second shipyard spawns much sooner
-    - ships spawned if anyone has more ships, or im maintaining a lead
-    - using mean and std as per v10
-
-    b
-        determine_best_harvest_spot_locally dependant on threat and dist from yard
+    - convert near high density spots
+    - maintain 3 yards
 """
 

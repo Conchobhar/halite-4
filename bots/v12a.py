@@ -1,3 +1,8 @@
+"""CHANGELOG
+    - convert near high density spots
+    - maintain 3 yards
+"""
+
 from kaggle_environments.envs.halite.helpers import Board, ShipAction, ShipyardAction, Ship, Shipyard, Point
 from collections import OrderedDict
 from functools import lru_cache
@@ -287,7 +292,7 @@ class MyAgent:
 
     def determine_best_harvest_spot_locally(self, ship):
         d = {}
-        for pos in self.get_adjs(ship.position, r=4):
+        for pos in self.get_adjs(ship.position, r=2):
             cell = self.board.cells[pos]
             if cell.shipyard is None:
                 threat_array = [(c.ship is not None and c.ship.player_id != self.me.id and c.ship.halite <= ship.halite)
@@ -687,7 +692,7 @@ class MyAgent:
                                    for ap in self.get_adjs(p, r=4)]
             self.ship_and_yard_density[p] = sum(collisionable_count)/len(collisionable_count)
             self.halite_density[p] = np.mean([cells[ap].halite for ap in self.get_adjs(p, r=4)] + [cell.halite])
-            halites = [cells[ap].halite for ap in self.get_adjs(p, r=4) if cells[ap].halite != 0] + [cell.halite]
+            halites = [cells[ap].halite for ap in self.get_adjs(p, r=2) if cells[ap].halite != 0] + [cell.halite]
             halites = halites if len(halites) > 0 else [0]
             # Local stats do not include 0 halite cells
             cell.halite_local_mean = np.mean(halites)
