@@ -267,19 +267,12 @@ class MyAgent:
     def determine_best_harvest_spot_locally(self, ship):
         d = {}
         for pos in self.get_adjs(ship.position, r=2):
-            cell = self.board.cells[pos]
-            if cell.shipyard is None:
-                threat_array = [(c.ship is not None and c.ship.player_id != self.me.id and c.ship.halite <= ship.halite)
-                                for c in self.get_adjs(ship.position, r=1, return_cells=True)]
-                threat_factor = 1 - sum(threat_array)/len(threat_array)
-                dist = self.dist(ship.log.yard.position, pos)
-                d[pos] = (self.board.cells[pos].halite / dist) * threat_factor
+            d[pos] = self.board.cells[pos].halite
         d = sorted(d, key=d.get)[::-1]
         for pos in d:
             if pos not in LOG.spots and not self.is_pos_occupied_by_threat(ship, pos):
                 return pos
         return None
-
 
     def determine_best_harvest_spot_from_yard(self, ship):
         # Choose a spot to harvest - values already sorted desceding.
@@ -618,7 +611,7 @@ class MyAgent:
                                              if self.dist(s.position, sy.position) <= radius
                                              and s.log.role != 'DFND']
                 if len(nearby_candidates_by_dist) > 0:
-                    ship = min(nearby_candidates_by_dist, key=lambda x: x[1])
+                    ship = min(nearby_candidates_by_dist, key=lambda x: x[1])[0]
                     print(f'\tNearby candidate: {ship.id} at P{ship.position}\n')
                     LOG.yard2defenders[sy] = ship
                     ship.log.role_suspended = ship.log.role if ship.log.role != 'NEW' else 'HVST'

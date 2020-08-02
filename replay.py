@@ -11,14 +11,14 @@ try:
     from bots import latest
     agent = latest()
 except:
-    from bots.v9 import agent  # CONFIG - MANUALLY IMPORT BOT
+    from bots.v11 import agent  # CONFIG - MANUALLY IMPORT BOT
 
 # CONFIG - REPLAY AND CORRESPONDING ID
 pathdl = Path('/home/xu/Downloads/')
 # path_replay = pathdl / '1984103.json'
 paths = pathdl.glob('*.json')
 path_replay = max(paths, key=lambda p:p.stat().st_ctime)
-myid = 2
+myid = 3
 
 
 
