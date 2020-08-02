@@ -3,5 +3,8 @@
     - second shipyard spawns much sooner
     - ships spawned if anyone has more ships, or im maintaining a lead
     - using mean and std as per v10
+
+    b
+        determine_best_harvest_spot_locally dependant on threat and dist from yard
 """
 
