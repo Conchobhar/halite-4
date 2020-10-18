@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-pathroot = Path('/home/xu/work/kaggle/halite/')
+pathroot = Path(f'{os.environ["HOME"]}/work/kaggle/halite/')
 
 
 def write_html(html, name):

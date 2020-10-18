@@ -1,5 +1,3 @@
 """CHANGELOG
-    - convert near high density spots
-    - maintain 3 yards
+...
 """
-

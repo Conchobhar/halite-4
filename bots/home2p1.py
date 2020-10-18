@@ -189,11 +189,10 @@ class MyAgent:
         if self.yardcount == 0:
             return self.prospective_yard
         if self.yardcount == 1:
-            return [sy for sy in self.board.shipyards.values()][0]
-        for sy in self.board.shipyards:
-            raise BaseException('NOT IMPLEMENTED YET')
-        shipyard = ...
-        return shipyard
+            return self.me.shipyards[0]
+        else:
+            dist2yards = [(self.dist(pos, sy.position), sy) for sy in self.me.shipyards]
+            return min(dist2yards, key=lambda x: x[0])[1]
 
     @staticmethod
     def assign_role(ship):
@@ -333,13 +332,11 @@ class MyAgent:
         if len(self.me.ships) == 1:
             return self.me.ships[0]
         else:
-            ship_mean_dist = {}
-            pair_dists = {}
-            for pair in combinations([s.position for s in self.me.ships], 2):
-                pair_dists[pair] = self.dist(*pair)
-            for ship in self.me.ships:
-                ship_mean_dist[ship] = np.mean([dist for pair, dist in pair_dists.items() if ship.position in pair])
-        return sorted(ship_mean_dist, key=ship_mean_dist.get)[0]
+            p0sy = [sy for sy in self.board.shipyards.values() if sy.player_id == 0]
+            p0sy = p0sy[0].position if len(p0sy) > 0 else Point(5,15)
+            ships = {s: self.dist(s.position, p0sy) for s in self.me.ships if
+                     self.dist(s.position, p0sy) <= 5 and self.board.cells[s.position].shipyard is None}
+        return sorted(ships, key=ships.get)[0]
 
     @lru_cache(maxsize=21 ** 2)
     def get_adjs(self, p, r=2):
@@ -419,7 +416,9 @@ class MyAgent:
                 print(f"Action Iter:{self.action_iter}")
 
             # If no yards, create and mark point
-            if len(self.me.shipyards) == 0:
+            p0sy = [sy for sy in self.board.shipyards.values() if sy.player_id == 0]
+            p0sy = p0sy[0].position if len(p0sy) > 0 else Point(5,15)
+            if len(self.me.shipyards) == 0 or any([self.dist(s.position, p0sy) <= 2 for s in self.me.ships]):
                 ship = self.get_best_ship_for_yard()
                 ship.next_action = ShipAction.CONVERT
                 ship.log.set_action = ShipAction.CONVERT
@@ -458,7 +457,7 @@ class MyAgent:
             # If we can afford spawn, considering cumulation of other SY spawns and keeping a reserve for one yard.
             have_enough_halite = (me.halite - spawncount * config.spawnCost - reserve) >= config.spawnCost
             no_ship_reserved_point = shipyard.position not in LOG.set_points
-            if have_enough_halite and should_still_spawn and no_ship_reserved_point and self.keep_spawning_tripswitch:
+            if self.me.halite > 1000:
                 shipyard.next_action = ShipyardAction.SPAWN
                 spawncount += 1
         self.board_prev = self.board

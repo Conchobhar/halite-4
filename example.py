@@ -1,27 +1,26 @@
-import os
-from pathlib import Path
-from kaggle_environments import evaluate, make
+from kaggle_environments import make
 from time import time
 from utils.base import write_html
-from agent.base import agent
-from bots import v10, v9, home2p1
+from agent.main import agent
 
 """SEEDS
 """
-config = {"size": 21, "startingHalite": 24000, "randomSeed": 824666594}
+config = {"size": 21, "startingHalite": 24000, "randomSeed": 131300848}
 env = make("halite", configuration=config, debug=True)
 trainer = env.train([None, 'random', 'random', 'random'])
-# config = {"size": 21, "startingHalite": 24000, "randomSeed": 824666594}
-# env = make("halite", configuration=config, debug=True)
-# trainer = env.train([None, 'random',])
+trainer = env.train([None, 'bots/v40e.py', 'bots/v40e.py', 'agent/main.py'])
 
 
 def play():
+    """Play bots locally."""
     obs = trainer.reset()
+    actTime = 0
     while not env.done:
+        t0 = time()
         my_actions = agent(obs, env.configuration)
-        icon = ['-_-', '_-_'][(obs.step+1) % 2]
-        print(f'{icon} step+1: {obs.step +1} n actions: {len(my_actions)}', end="\r", flush=True)
+        actTime = time() - t0
+        icon = ['>---', '->--', '-->-', '--->',][(obs.step+1) % 4]
+        print(f'{icon} step+1: {obs.step +1} n actions: {len(my_actions)} prevActTime:{actTime}', end="\r", flush=True)
         obs, reward, done, info = trainer.step(my_actions)
         t = env.render(mode='html', return_obj=True, width=800, height=800, header=False, controls=True)
         write_html(t, 'render.html')
@@ -30,24 +29,3 @@ def play():
 t0 = time()
 play()
 print(time() - t0)
-
-# Use env to Play:
-# env.run(["./submission.py", "random"])
-# env.render(mode="ipython", width=800, height=600)
-
-
-
-# CONFIG
-# {'size': 5,
-#  'startingHalite': 1000,
-#  'episodeSteps': 400,
-#  'agentExec': 'LOCAL',
-#  'agentTimeout': 30,
-#  'actTimeout': 6,
-#  'runTimeout': 9600,
-#  'spawnCost': 500,
-#  'convertCost': 500,
-#  'moveCost': 0,
-#  'collectRate': 0.25,
-#  'regenRate': 0.02,
-#  'maxCellHalite': 500}
